@@ -14,6 +14,7 @@ import (
 const (
 	settingGeneralDefaultMode        = "general.default_mode"
 	settingGeneralStrictValidation   = "general.strict_booru_validation"
+	settingGeneralTagWhitespace      = "general.tag_whitespace"
 	settingProviderEnabled           = "provider.enabled"
 	settingProviderName              = "provider.name"
 	settingProviderAPIBaseURL        = "provider.api_base_url"
@@ -100,6 +101,7 @@ func (i settingItem) FilterValue() string {
 var settingsFields = []settingField{
 	{key: settingGeneralDefaultMode, group: "General", title: "Default Mode", description: "Default prompting mode", kind: settingKindEnum, enumValues: []string{"natural", "booru", "hybrid"}},
 	{key: settingGeneralStrictValidation, group: "General", title: "Strict Booru Validation", description: "Filter booru output to retrieved tags only", kind: settingKindBool},
+	{key: settingGeneralTagWhitespace, group: "General", title: "Tag Whitespace", description: "Replace underscores with spaces in output", kind: settingKindBool},
 	{key: settingProviderEnabled, group: "Provider", title: "Enabled", description: "Enable online provider calls", kind: settingKindBool},
 	{key: settingProviderName, group: "Provider", title: "Name", description: "Active provider integration", kind: settingKindEnum, enumValues: []string{"openai", "openrouter", "nanogpt"}},
 	{key: settingProviderAPIBaseURL, group: "Provider", title: "API Base URL", description: "Override API endpoint", kind: settingKindString},
@@ -135,6 +137,8 @@ func displaySettingValue(cfg config.Config, key string) string {
 		return string(cfg.General.DefaultMode)
 	case settingGeneralStrictValidation:
 		return fmt.Sprintf("%t", cfg.General.StrictBooruValidation)
+	case settingGeneralTagWhitespace:
+		return fmt.Sprintf("%t", cfg.General.TagWhitespace)
 	case settingProviderEnabled:
 		return fmt.Sprintf("%t", cfg.Provider.Enabled)
 	case settingProviderName:
@@ -200,6 +204,12 @@ func applySettingValue(cfg *config.Config, field settingField, raw string) error
 			return err
 		}
 		cfg.General.StrictBooruValidation = v
+	case settingGeneralTagWhitespace:
+		v, err := parseBool(raw)
+		if err != nil {
+			return err
+		}
+		cfg.General.TagWhitespace = v
 	case settingProviderEnabled:
 		v, err := parseBool(raw)
 		if err != nil {

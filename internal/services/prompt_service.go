@@ -140,6 +140,11 @@ func (s *PromptService) Enhance(ctx context.Context, req domain.EnhanceRequest) 
 		validationApplied = true
 		logging.Debug("strict booru validation applied")
 	}
+	
+	if cfg.General.TagWhitespace {
+		finalOutput = strings.ReplaceAll(finalOutput, "_", " ")
+		logging.Debug("tag whitespace replacement applied")
+	}
 
 	logging.Info("enhance complete",
 		"mode", mode,

@@ -15,6 +15,7 @@ type GeneralConfig struct {
 	PreferredProvider     string      `json:"preferred_provider"`
 	PreferredModel        string      `json:"preferred_model"`
 	StrictBooruValidation bool        `json:"strict_booru_validation"`
+	TagWhitespace         bool        `json:"tag_whitespace"`
 }
 
 type ProviderConfig struct {
@@ -50,6 +51,7 @@ func Default(paths Paths) Config {
 			PreferredProvider:     "openai",
 			PreferredModel:        "gpt-5.4-mini",
 			StrictBooruValidation: false,
+			TagWhitespace:         false,
 		},
 		Provider: ProviderConfig{
 			Enabled:        false,

@@ -27,6 +27,7 @@ func Assemble(in AssemblyInput) AssemblyOutput {
 		coreLogic(),
 		retrievalGuidance(),
 		detailingInstruction(),
+		weightInstruction(),
 		"Mode rules: " + modeRules(in.Mode),
 		"Technique stack: intent preservation, retrieval grounding, conflict avoidance, concise output shaping, character-consistent detailing.",
 		outputContract(),

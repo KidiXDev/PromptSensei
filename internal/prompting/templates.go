@@ -24,6 +24,14 @@ func retrievalGuidance() string {
 - Required identity anchors from character context must be kept to ensure character consistency.`
 }
 
+func weightInstruction() string {
+	return `Prompt Weighting:
+- Use (tag) or (tag:weight) ONLY when mission-critical.
+- Default behavior: Do NOT wrap tags in parentheses unless they are the primary focal point that needs extra emphasis. 90% of tags should NOT have weights.
+- Rationale: Weights are a "emergency" tool. If overused, they lose effectiveness and create noisy prompts. Only apply to 1-3 key focal tags if the prompt exceeds 75 tokens.
+- IMPORTANT: Booru tags often contain parentheses, e.g., "arona_(blue_archive)". To distinguish from weighting, you MUST escape them with backslashes if they are part of a literal tag, e.g., "arona_\(blue_archive\)". This is mandatory for tags with parentheses regardless of weighting.`
+}
+
 func outputContract() string {
 	return `Output contract:
 - Return only the final prompt.
