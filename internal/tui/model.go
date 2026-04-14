@@ -103,6 +103,8 @@ type model struct {
 	homeList      list.Model
 	knowledgeList list.Model
 	editor        textarea.Model
+	contextEditor textarea.Model
+	focusedEditor int
 	datasetView   viewport.Model
 	resultView    viewport.Model
 	settingsList  list.Model
@@ -193,11 +195,17 @@ func newModel(
 	knowledge.SetFilteringEnabled(false)
 
 	editor := textarea.New()
-	editor.Placeholder = "Describe your idea or paste a prompt..."
+	editor.Placeholder = "Enter your prompt here..."
 	editor.Focus()
 	editor.SetWidth(80)
-	editor.SetHeight(12)
+	editor.SetHeight(8)
 	editor.ShowLineNumbers = false
+
+	contextEditor := textarea.New()
+	contextEditor.Placeholder = "Optional: Add more context or instructions (e.g. 'make it longer', 'include outdoors')..."
+	contextEditor.SetWidth(80)
+	contextEditor.SetHeight(4)
+	contextEditor.ShowLineNumbers = false
 
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot))
 	spin.Style = accentStyle
@@ -220,6 +228,8 @@ func newModel(
 		homeList:          home,
 		knowledgeList:     knowledge,
 		editor:            editor,
+		contextEditor:     contextEditor,
+		focusedEditor:     0,
 		datasetView:       viewport.New(80, 14),
 		resultView:        viewport.New(80, 14),
 		settingsList:      settings,
@@ -435,21 +445,37 @@ func (m model) updateHome(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	m.editor, cmd = m.editor.Update(msg)
+	if m.focusedEditor == 0 {
+		m.editor, cmd = m.editor.Update(msg)
+	} else {
+		m.contextEditor, cmd = m.contextEditor.Update(msg)
+	}
 
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "esc":
 			m.screen = screenHome
 			return m, nil
+		case "tab":
+			m.focusedEditor = (m.focusedEditor + 1) % 2
+			if m.focusedEditor == 0 {
+				m.editor.Focus()
+				m.contextEditor.Blur()
+			} else {
+				m.editor.Blur()
+				m.contextEditor.Focus()
+			}
+			return m, nil
 		case "ctrl+s":
 			prompt := strings.TrimSpace(m.editor.Value())
+			context := strings.TrimSpace(m.contextEditor.Value())
 			if prompt == "" {
 				m.lastErr = "prompt cannot be empty"
 				return m, nil
 			}
 			req := &domain.EnhanceRequest{
 				Prompt:         prompt,
+				Context:        context,
 				Mode:           m.mode,
 				KnowledgeFiles: m.selectedKnowledgeList(),
 				StrictBooru:    m.strict,
@@ -480,6 +506,7 @@ func (m model) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+l":
 			m.editor.SetValue("")
+			m.contextEditor.SetValue("")
 			return m, nil
 		}
 	}
@@ -710,8 +737,15 @@ func (m *model) resizeComponents() {
 	m.homeList.SetSize(homeWidth, listHeight)
 	m.knowledgeList.SetSize(listWidth, listHeight)
 	m.settingsList.SetSize(listWidth, listHeight)
+	
+	totalEditorHeight := max(12, m.height-20)
+	promptHeight := int(float64(totalEditorHeight) * 0.7)
+	contextHeight := totalEditorHeight - promptHeight
+	
 	m.editor.SetWidth(max(40, m.width-14))
-	m.editor.SetHeight(max(8, m.height-20))
+	m.editor.SetHeight(max(6, promptHeight))
+	m.contextEditor.SetWidth(max(40, m.width-14))
+	m.contextEditor.SetHeight(max(3, contextHeight))
 
 	viewportWidth := max(40, m.width-12)
 	viewportHeight := max(8, m.height-18)
@@ -775,12 +809,17 @@ func (m model) renderEditor() string {
 		info,
 		"Knowledge: " + helpStyle.Render(knowledge),
 		"",
+		accentStyle.Render("Prompt"),
 		m.editor.View(),
+		"",
+		accentStyle.Render("Context (Optional)"),
+		m.contextEditor.View(),
 		"",
 		helpStyle.Render(
 			fmt.Sprintf(
-				"%s submit  %s mode  %s strict  %s task  %s knowledge  %s clear  %s back",
+				"%s submit  %s switch  %s mode  %s strict  %s task  %s knowledge  %s clear  %s back",
 				keyStyle.Render("ctrl+s"),
+				keyStyle.Render("tab"),
 				keyStyle.Render("ctrl+g"),
 				keyStyle.Render("ctrl+b"),
 				keyStyle.Render("ctrl+t"),

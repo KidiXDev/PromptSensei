@@ -8,12 +8,13 @@ import (
 )
 
 type AssemblyInput struct {
-	Mode        domain.Mode
-	SystemRules string
-	UserPrompt  string
-	Knowledge   []domain.KnowledgeDoc
-	Retrieval   domain.RetrievalResult
-	CreateMode  bool
+	Mode            domain.Mode
+	SystemRules     string
+	UserPrompt      string
+	OptionalContext string
+	Knowledge       []domain.KnowledgeDoc
+	Retrieval       domain.RetrievalResult
+	CreateMode      bool
 }
 
 type AssemblyOutput struct {
@@ -46,11 +47,14 @@ func Assemble(in AssemblyInput) AssemblyOutput {
 	}
 
 	intentPrompt := fmt.Sprintf(
-		"Task intent:\n%s\n\nUser input:\n%s\n\nPrompt checks:\n%s",
+		"Task intent:\n%s\n\nUser input:\n%s",
 		intent,
 		strings.TrimSpace(in.UserPrompt),
-		strings.Join(promptChecks(in.Mode), "\n"),
 	)
+	if strings.TrimSpace(in.OptionalContext) != "" {
+		intentPrompt += fmt.Sprintf("\n\nUser context/instructions:\n%s", strings.TrimSpace(in.OptionalContext))
+	}
+	intentPrompt += fmt.Sprintf("\n\nPrompt checks:\n%s", strings.Join(promptChecks(in.Mode), "\n"))
 	retrievalPrompt := fmt.Sprintf(
 		"Retrieval summary:\n%s\n%s\n%s\n%s\n\nRetrieval details:\n%s\n%s\n\nImportant:\n- `suggested_tags` are optional hints, not mandatory output.\n- Keep high-confidence required identity details from matched character context unless user explicitly conflicts.\n- Suggested tags are shown because of lookup matches and character/core-tag correlation; use only when they strengthen coherence.",
 		confirmed,

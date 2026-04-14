@@ -28,6 +28,7 @@ func ParseMode(raw string) (Mode, error) {
 
 type EnhanceRequest struct {
 	Prompt         string
+	Context        string
 	Mode           Mode
 	KnowledgeFiles []string
 	StrictBooru    bool

@@ -96,12 +96,13 @@ func (s *PromptService) Enhance(ctx context.Context, req domain.EnhanceRequest) 
 
 	knowledgeDocs, warnings := s.knowledge.LoadSelected(req.KnowledgeFiles)
 	assembled := prompting.Assemble(prompting.AssemblyInput{
-		Mode:        mode,
-		SystemRules: systemRules,
-		UserPrompt:  req.Prompt,
-		Knowledge:   knowledgeDocs,
-		Retrieval:   retrieval,
-		CreateMode:  req.CreateMode,
+		Mode:            mode,
+		SystemRules:     systemRules,
+		UserPrompt:      req.Prompt,
+		OptionalContext: req.Context,
+		Knowledge:       knowledgeDocs,
+		Retrieval:       retrieval,
+		CreateMode:      req.CreateMode,
 	})
 
 	finalOutput := deterministicFallback(mode, req.Prompt, retrieval)
