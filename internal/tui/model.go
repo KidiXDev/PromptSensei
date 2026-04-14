@@ -412,6 +412,7 @@ func (m model) updateHome(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(m.spin.Tick, datasetStatusCmd(m.ctx, m.datasetService))
 			case actionKnowledge:
 				m.knowledgeReturn = screenHome
+				m.syncKnowledgeListSelection()
 				m.screen = screenKnowledge
 				return m, nil
 			case actionSettings:
@@ -466,6 +467,7 @@ func (m model) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+k":
 			m.knowledgeReturn = screenEditor
+			m.syncKnowledgeListSelection()
 			m.screen = screenKnowledge
 			return m, nil
 		case "ctrl+t":
@@ -490,10 +492,10 @@ func (m model) updateKnowledge(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
-		case "esc", "enter":
+		case "esc", "q":
 			m.screen = m.knowledgeReturn
 			return m, nil
-		case " ":
+		case " ", "enter":
 			idx := m.knowledgeList.Index()
 			items := m.knowledgeList.Items()
 			if idx < 0 || idx >= len(items) {
@@ -511,6 +513,11 @@ func (m model) updateKnowledge(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			items[idx] = item
 			m.knowledgeList.SetItems(items)
+			if item.selected {
+				m.notice = "Knowledge enabled: " + item.name
+			} else {
+				m.notice = "Knowledge disabled: " + item.name
+			}
 			return m, nil
 		case "a":
 			items := m.knowledgeList.Items()
@@ -783,10 +790,10 @@ func (m model) renderKnowledge() string {
 		helpStyle.Render(
 			fmt.Sprintf(
 				"%s toggle  %s all  %s clear  %s back",
-				keyStyle.Render("space"),
+				keyStyle.Render("enter/space"),
 				keyStyle.Render("a"),
 				keyStyle.Render("c"),
-				keyStyle.Render("esc/enter"),
+				keyStyle.Render("esc/q"),
 			),
 		),
 	}
@@ -1026,6 +1033,20 @@ func (m model) selectedKnowledgeList() []string {
 	return out
 }
 
+func (m *model) syncKnowledgeListSelection() {
+	items := m.knowledgeList.Items()
+	for i := range items {
+		item, ok := items[i].(knowledgeItem)
+		if !ok {
+			continue
+		}
+		_, selected := m.selectedKnowledge[item.name]
+		item.selected = selected
+		items[i] = item
+	}
+	m.knowledgeList.SetItems(items)
+}
+
 func nextMode(current domain.Mode) domain.Mode {
 	switch current {
 	case domain.ModeNatural:
@@ -1124,10 +1145,9 @@ func buildResultText(result *domain.EnhanceResult, warnings []string) string {
 	lines := []string{
 		"Output",
 		"------",
-		result.Output,
+		formatPromptForDisplay(result.Output, 96),
 		"",
 		fmt.Sprintf("Provider: %s (used=%t)", result.ProviderName, result.UsedProvider),
-		fmt.Sprintf("Prompt chain: applied=%t stages=%d", result.ChainApplied, result.ChainStages),
 		fmt.Sprintf("Validation applied: %t", result.ValidationApplied),
 		"",
 		"Retrieval Summary",
@@ -1221,4 +1241,38 @@ func ternary[T any](cond bool, left T, right T) T {
 		return left
 	}
 	return right
+}
+
+func formatPromptForDisplay(prompt string, maxWidth int) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "(empty)"
+	}
+	parts := strings.Split(prompt, ",")
+	lines := make([]string, 0, len(parts))
+	current := ""
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if current == "" {
+			current = part
+			continue
+		}
+		next := current + ", " + part
+		if len(next) > maxWidth {
+			lines = append(lines, current+",")
+			current = part
+			continue
+		}
+		current = next
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	if len(lines) == 0 {
+		return prompt
+	}
+	return strings.Join(lines, "\n")
 }

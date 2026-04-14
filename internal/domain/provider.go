@@ -4,7 +4,7 @@ import "context"
 
 type GenerateRequest struct {
 	SystemPrompt string
-	UserPrompt   string
+	UserPrompts  []string
 	Model        string
 	Temperature  float64
 	MaxTokens    int

@@ -17,7 +17,6 @@ func TestBootstrapCreatesDefaultStructure(t *testing.T) {
 	required := []string{
 		paths.RootDir,
 		paths.ConfigFile,
-		paths.PersonaFile,
 		paths.SystemFile,
 		paths.TagCSV,
 		paths.CharacterCSV,

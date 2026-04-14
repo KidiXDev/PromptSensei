@@ -14,8 +14,6 @@ import (
 const (
 	settingGeneralDefaultMode        = "general.default_mode"
 	settingGeneralStrictValidation   = "general.strict_booru_validation"
-	settingGeneralPreferredProvider  = "general.preferred_provider"
-	settingGeneralPreferredModel     = "general.preferred_model"
 	settingProviderEnabled           = "provider.enabled"
 	settingProviderName              = "provider.name"
 	settingProviderAPIBaseURL        = "provider.api_base_url"
@@ -74,8 +72,6 @@ func (i settingItem) FilterValue() string {
 var settingsFields = []settingField{
 	{key: settingGeneralDefaultMode, group: "General", title: "Default Mode", description: "Default prompting mode", kind: settingKindEnum, enumValues: []string{"natural", "booru", "hybrid"}},
 	{key: settingGeneralStrictValidation, group: "General", title: "Strict Booru Validation", description: "Filter booru output to retrieved tags only", kind: settingKindBool},
-	{key: settingGeneralPreferredProvider, group: "General", title: "Preferred Provider", description: "Provider shown as default preference", kind: settingKindEnum, enumValues: []string{"openai", "openrouter", "nanogpt"}},
-	{key: settingGeneralPreferredModel, group: "General", title: "Preferred Model", description: "Default model hint", kind: settingKindString},
 	{key: settingProviderEnabled, group: "Provider", title: "Enabled", description: "Enable online provider calls", kind: settingKindBool},
 	{key: settingProviderName, group: "Provider", title: "Name", description: "Active provider integration", kind: settingKindEnum, enumValues: []string{"openai", "openrouter", "nanogpt"}},
 	{key: settingProviderAPIBaseURL, group: "Provider", title: "API Base URL", description: "Override API endpoint", kind: settingKindString},
@@ -111,10 +107,6 @@ func displaySettingValue(cfg config.Config, key string) string {
 		return string(cfg.General.DefaultMode)
 	case settingGeneralStrictValidation:
 		return fmt.Sprintf("%t", cfg.General.StrictBooruValidation)
-	case settingGeneralPreferredProvider:
-		return strings.TrimSpace(cfg.General.PreferredProvider)
-	case settingGeneralPreferredModel:
-		return strings.TrimSpace(cfg.General.PreferredModel)
 	case settingProviderEnabled:
 		return fmt.Sprintf("%t", cfg.Provider.Enabled)
 	case settingProviderName:
@@ -180,10 +172,6 @@ func applySettingValue(cfg *config.Config, field settingField, raw string) error
 			return err
 		}
 		cfg.General.StrictBooruValidation = v
-	case settingGeneralPreferredProvider:
-		cfg.General.PreferredProvider = normalizeProviderName(raw)
-	case settingGeneralPreferredModel:
-		cfg.General.PreferredModel = raw
 	case settingProviderEnabled:
 		v, err := parseBool(raw)
 		if err != nil {
@@ -197,9 +185,6 @@ func applySettingValue(cfg *config.Config, field settingField, raw string) error
 		cfg.Provider.Name = next
 		if prevBase == "" || prevBase == defaultAPIBase(prevProvider) {
 			cfg.Provider.APIBaseURL = defaultAPIBase(next)
-		}
-		if strings.TrimSpace(cfg.General.PreferredProvider) == "" {
-			cfg.General.PreferredProvider = next
 		}
 	case settingProviderAPIBaseURL:
 		cfg.Provider.APIBaseURL = raw

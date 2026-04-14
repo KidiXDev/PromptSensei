@@ -89,6 +89,35 @@ func TestApplyConflictsPrefersExplicitPromptTag(t *testing.T) {
 	}
 }
 
+func TestSelectCharacterMatchesPrefersNameOverCopyright(t *testing.T) {
+	weights := map[string]float64{
+		"arona":        4.2,
+		"blue archive": 3.0,
+	}
+	matches := []sqlite.CharacterMatch{
+		{
+			Character: domain.Character{Name: "sensei_(blue_archive)", Count: 1500},
+			MatchType: "copyright",
+		},
+		{
+			Character: domain.Character{Name: "yuuka_(blue_archive)", Count: 1200},
+			MatchType: "copyright",
+		},
+		{
+			Character: domain.Character{Name: "arona_(blue_archive)", Count: 800},
+			MatchType: "trigger", MatchedTerm: "arona",
+		},
+	}
+
+	selected := selectCharacterMatches("arona from blue archive playing on beach", matches, weights)
+	if len(selected) != 1 {
+		t.Fatalf("expected one selected character, got %d", len(selected))
+	}
+	if selected[0].Character.Name != "arona_(blue_archive)" {
+		t.Fatalf("expected arona selected, got %s", selected[0].Character.Name)
+	}
+}
+
 func containsTag(tags []domain.TagCandidate, name string) bool {
 	for _, t := range tags {
 		if t.Name == name {

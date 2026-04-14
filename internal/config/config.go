@@ -58,7 +58,7 @@ func Default(paths Paths) Config {
 			APIKey:         "",
 			Model:          "gpt-5.4-mini",
 			Temperature:    0.7,
-			MaxTokens:      700,
+			MaxTokens:      32000,
 			TimeoutSeconds: 60,
 		},
 		UI: UIConfig{
@@ -102,6 +102,10 @@ func (c *Config) ApplyDefaults(paths Paths) {
 		c.Provider.Temperature = d.Provider.Temperature
 	}
 	if c.Provider.MaxTokens == 0 {
+		c.Provider.MaxTokens = d.Provider.MaxTokens
+	}
+	// Migrate legacy default (700) to modern high-context default.
+	if c.Provider.MaxTokens == 700 && c.Provider.Model == d.Provider.Model {
 		c.Provider.MaxTokens = d.Provider.MaxTokens
 	}
 	if c.Provider.TimeoutSeconds <= 0 {

@@ -48,12 +48,22 @@ func (c *Client) Generate(ctx context.Context, req domain.GenerateRequest) (*dom
 	}
 	logging.Debug("openrouter request", "url", c.baseURL+"/chat/completions", "model", req.Model, "temperature", req.Temperature, "max_tokens", req.MaxTokens)
 
+	messages := make([]map[string]string, 0, 1+len(req.UserPrompts))
+	messages = append(messages, map[string]string{"role": "system", "content": req.SystemPrompt})
+	for _, prompt := range req.UserPrompts {
+		prompt = strings.TrimSpace(prompt)
+		if prompt == "" {
+			continue
+		}
+		messages = append(messages, map[string]string{"role": "user", "content": prompt})
+	}
+	if len(messages) == 1 {
+		return nil, fmt.Errorf("openrouter user prompts are empty")
+	}
+
 	payload := map[string]any{
-		"model": req.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": req.SystemPrompt},
-			{"role": "user", "content": req.UserPrompt},
-		},
+		"model":       req.Model,
+		"messages":    messages,
 		"temperature": req.Temperature,
 		"max_tokens":  req.MaxTokens,
 	}

@@ -9,6 +9,17 @@ import (
 
 func FilterBooruOutput(output string, retrieval domain.RetrievalResult) string {
 	allowed := map[string]struct{}{}
+	alwaysAllowed := []string{
+		"masterpiece",
+		"best_quality",
+		"newest",
+		"highres",
+		"absurdres",
+		"ultra_detailed",
+	}
+	for _, tag := range alwaysAllowed {
+		allowed[tag] = struct{}{}
+	}
 	for _, bucket := range [][]domain.TagCandidate{
 		retrieval.ConfirmedTags,
 		retrieval.CharacterTags,

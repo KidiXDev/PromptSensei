@@ -15,7 +15,6 @@ type Paths struct {
 	RootDir        string
 	ConfigFile     string
 	InstructionDir string
-	PersonaFile    string
 	SystemFile     string
 	KnowledgeDir   string
 	SystemDir      string
@@ -55,7 +54,6 @@ func BuildPaths(root string) Paths {
 		RootDir:        root,
 		ConfigFile:     filepath.Join(root, "config.cfg"),
 		InstructionDir: instructionDir,
-		PersonaFile:    filepath.Join(instructionDir, "persona.md"),
 		SystemFile:     filepath.Join(instructionDir, "system.md"),
 		KnowledgeDir:   knowledgeDir,
 		SystemDir:      systemDir,

@@ -27,6 +27,7 @@ func (r *Retriever) Retrieve(ctx context.Context, prompt string, mode domain.Mod
 	if err != nil {
 		return domain.RetrievalResult{}, err
 	}
+	charMatches = selectCharacterMatches(prompt, charMatches, termWeights)
 	tagMatches, err := r.repo.FindTagsByTerms(ctx, terms, 60)
 	if err != nil {
 		return domain.RetrievalResult{}, err
@@ -39,6 +40,7 @@ func (r *Retriever) Retrieve(ctx context.Context, prompt string, mode domain.Mod
 	confirmed := make(map[string]domain.TagCandidate)
 	characterTags := make(map[string]domain.TagCandidate)
 	suggested := make(map[string]domain.TagCandidate)
+	characterContexts := make([]domain.CharacterRetrievalContext, 0, len(charMatches))
 	explicitTags := explicitTagsFromPrompt(prompt)
 
 	for _, m := range tagMatches {
@@ -66,6 +68,13 @@ func (r *Retriever) Retrieve(ctx context.Context, prompt string, mode domain.Mod
 			Reason:    "character " + c.MatchType + " match (" + c.MatchedTerm + ")",
 		}
 		characterTags[charCandidate.Name] = charCandidate
+
+		charCtx := domain.CharacterRetrievalContext{
+			Name:          c.Character.Name,
+			MatchType:     c.MatchType,
+			MatchedTerm:   c.MatchedTerm,
+			CopyrightName: c.Character.CopyrightName,
+		}
 
 		if c.Character.CopyrightName != "" {
 			cp := domain.TagCandidate{
@@ -95,7 +104,13 @@ func (r *Retriever) Retrieve(ctx context.Context, prompt string, mode domain.Mod
 			if existing, ok := suggested[core.Name]; !ok || existing.Score < core.Score {
 				suggested[core.Name] = core
 			}
+			if isCharacterAnchorTag(coreTag.TagName) {
+				charCtx.AnchorTags = appendUniqueString(charCtx.AnchorTags, coreTag.TagName)
+			} else {
+				charCtx.SuggestedTags = appendUniqueString(charCtx.SuggestedTags, coreTag.TagName)
+			}
 		}
+		characterContexts = append(characterContexts, charCtx)
 	}
 
 	for _, t := range prefixTags {
@@ -124,6 +139,7 @@ func (r *Retriever) Retrieve(ctx context.Context, prompt string, mode domain.Mod
 		CharacterTags: characterList,
 		SuggestedTags: suggestedList,
 		RejectedTags:  rejected,
+		Characters:    characterContexts,
 		Debug: map[string]any{
 			"mode":         mode,
 			"terms":        terms,
@@ -131,6 +147,101 @@ func (r *Retriever) Retrieve(ctx context.Context, prompt string, mode domain.Mod
 			"explicit":     explicitTags,
 		},
 	}, nil
+}
+
+func selectCharacterMatches(prompt string, matches []sqlite.CharacterMatch, termWeights map[string]float64) []sqlite.CharacterMatch {
+	if len(matches) <= 1 {
+		return matches
+	}
+
+	highConfidence := make([]sqlite.CharacterMatch, 0, len(matches))
+	copyrightOnly := make([]sqlite.CharacterMatch, 0, len(matches))
+	for _, m := range matches {
+		if m.MatchType == "name" || m.MatchType == "trigger" {
+			highConfidence = append(highConfidence, m)
+		} else {
+			copyrightOnly = append(copyrightOnly, m)
+		}
+	}
+
+	allowMulti := promptAllowsMultipleCharacters(prompt)
+	if len(highConfidence) > 0 {
+		sort.Slice(highConfidence, func(i, j int) bool {
+			left := scoreFromMatch(highConfidence[i].MatchType, highConfidence[i].Character.Count) + termWeightBoost(termWeights, highConfidence[i].MatchedTerm)
+			right := scoreFromMatch(highConfidence[j].MatchType, highConfidence[j].Character.Count) + termWeightBoost(termWeights, highConfidence[j].MatchedTerm)
+			if left == right {
+				return highConfidence[i].Character.Count > highConfidence[j].Character.Count
+			}
+			return left > right
+		})
+		if !allowMulti {
+			return highConfidence[:1]
+		}
+		if len(highConfidence) > 3 {
+			return highConfidence[:3]
+		}
+		return highConfidence
+	}
+
+	if !allowMulti && len(copyrightOnly) > 0 {
+		sort.Slice(copyrightOnly, func(i, j int) bool {
+			left := scoreFromMatch(copyrightOnly[i].MatchType, copyrightOnly[i].Character.Count) + termWeightBoost(termWeights, copyrightOnly[i].MatchedTerm)
+			right := scoreFromMatch(copyrightOnly[j].MatchType, copyrightOnly[j].Character.Count) + termWeightBoost(termWeights, copyrightOnly[j].MatchedTerm)
+			if left == right {
+				return copyrightOnly[i].Character.Count > copyrightOnly[j].Character.Count
+			}
+			return left > right
+		})
+		return copyrightOnly[:1]
+	}
+	if len(copyrightOnly) > 3 {
+		return copyrightOnly[:3]
+	}
+	return copyrightOnly
+}
+
+func promptAllowsMultipleCharacters(prompt string) bool {
+	norm := " " + utils.NormalizeForLookup(prompt) + " "
+	markers := []string{
+		" 2girls ", " 2boys ", " 3girls ", " 3boys ", " multiple ", " group ", " duo ", " trio ", " pair ",
+	}
+	for _, marker := range markers {
+		if strings.Contains(norm, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCharacterAnchorTag(tag string) bool {
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	if tag == "" {
+		return false
+	}
+	anchorTokens := []string{
+		"_hair", "_eyes", "_pupils", "_bangs", "_ahoge",
+		"uniform", "halo", "hair_ornament", "hairclip", "hairband",
+		"twintails", "ponytail", "long_hair", "short_hair",
+	}
+	for _, token := range anchorTokens {
+		if strings.Contains(tag, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUniqueString(input []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return input
+	}
+	for _, existing := range input {
+		if existing == value {
+			return input
+		}
+	}
+	return append(input, value)
 }
 
 func buildTermWeights(prompt string) map[string]float64 {

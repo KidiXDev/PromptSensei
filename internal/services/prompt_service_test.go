@@ -6,29 +6,26 @@ import (
 	"github.com/kidixdev/PromptSensei/internal/domain"
 )
 
-func TestParsePromptChainPlanFromWrappedJSON(t *testing.T) {
-	raw := "plan:\n{\"intent\":\"enhance\",\"subject\":\"miku\",\"style\":\"anime\",\"composition\":[\"close-up\"],\"lighting\":[\"rim light\"],\"must_include_tags\":[\"hatsune_miku\"],\"avoid_tags\":[\"lowres\"],\"quality_signals\":[\"coherent\"]}\nend"
-	plan, err := parsePromptChainPlan(raw)
-	if err != nil {
-		t.Fatalf("parse plan: %v", err)
+func TestDeterministicFallbackHybridIncludesPromptAndTags(t *testing.T) {
+	out := deterministicFallback(domain.ModeHybrid, "girl in city", domain.RetrievalResult{
+		CharacterTags: []domain.TagCandidate{{Name: "1girl"}},
+		SuggestedTags: []domain.TagCandidate{{Name: "cityscape"}},
+	})
+	if out == "" {
+		t.Fatalf("expected fallback output")
 	}
-	if plan.Intent != "enhance" {
-		t.Fatalf("expected intent enhance, got %q", plan.Intent)
-	}
-	if len(plan.MustInclude) != 1 || plan.MustInclude[0] != "hatsune_miku" {
-		t.Fatalf("unexpected must include tags: %#v", plan.MustInclude)
+	if out != "masterpiece, best quality, newest, girl in city, 1girl, cityscape" {
+		t.Fatalf("unexpected fallback output: %s", out)
 	}
 }
 
-func TestFallbackPromptChainPlanUsesRetrieval(t *testing.T) {
-	plan := fallbackPromptChainPlan("miku in city", domain.RetrievalResult{
-		CharacterTags: []domain.TagCandidate{{Name: "hatsune_miku"}},
-		RejectedTags:  []domain.RejectedTag{{Name: "day", Reason: "conflict"}},
-	}, true)
-	if len(plan.MustInclude) == 0 || plan.MustInclude[0] != "hatsune_miku" {
-		t.Fatalf("expected retrieval tags in fallback plan")
-	}
-	if len(plan.Avoid) == 0 || plan.Avoid[0] != "day" {
-		t.Fatalf("expected rejected tags in fallback avoid list")
+func TestJoinTagsDeduplicatesCandidates(t *testing.T) {
+	out := joinTags(domain.RetrievalResult{
+		CharacterTags: []domain.TagCandidate{{Name: "1girl"}},
+		ConfirmedTags: []domain.TagCandidate{{Name: "1girl"}, {Name: "smile"}},
+		SuggestedTags: []domain.TagCandidate{{Name: "smile"}, {Name: "sunset"}},
+	})
+	if out != "1girl, smile, sunset" {
+		t.Fatalf("unexpected joined tags: %s", out)
 	}
 }
