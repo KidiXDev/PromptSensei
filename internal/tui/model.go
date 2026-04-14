@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -80,12 +81,18 @@ type startupRebuildCheckDoneMsg struct {
 	err     error
 }
 
+type settingsSavedMsg struct {
+	err error
+}
+
 type model struct {
 	ctx context.Context
 
 	promptService    *services.PromptService
 	datasetService   *services.DatasetService
 	knowledgeService *services.KnowledgeService
+	saveConfig       func(config.Config) error
+	configPath       string
 	cfg              config.Config
 
 	screen          screen
@@ -98,7 +105,9 @@ type model struct {
 	editor        textarea.Model
 	datasetView   viewport.Model
 	resultView    viewport.Model
-	settingsView  viewport.Model
+	settingsList  list.Model
+	settingsDraft config.Config
+	settingsInput textinput.Model
 	spin          spinner.Model
 
 	mode          domain.Mode
@@ -118,6 +127,9 @@ type model struct {
 	lastRequest   *domain.EnhanceRequest
 	lastResult    *domain.EnhanceResult
 	warnings      []string
+	settingsDirty bool
+	settingsEdit  bool
+	settingsError string
 
 	selectedKnowledge map[string]struct{}
 	rebuildProgressCh <-chan services.DatasetRebuildProgress
@@ -129,7 +141,9 @@ func Run(
 	promptService *services.PromptService,
 	datasetService *services.DatasetService,
 	knowledgeService *services.KnowledgeService,
+	configPath string,
 	cfg config.Config,
+	saveConfig func(config.Config) error,
 	in io.Reader,
 	out io.Writer,
 ) error {
@@ -138,7 +152,7 @@ func Run(
 		return err
 	}
 
-	m := newModel(ctx, promptService, datasetService, knowledgeService, cfg, knowledgeFiles)
+	m := newModel(ctx, promptService, datasetService, knowledgeService, configPath, cfg, saveConfig, knowledgeFiles)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithInput(in), tea.WithOutput(out))
 	_, err = p.Run()
 	return err
@@ -149,7 +163,9 @@ func newModel(
 	promptService *services.PromptService,
 	datasetService *services.DatasetService,
 	knowledgeService *services.KnowledgeService,
+	configPath string,
 	cfg config.Config,
+	saveConfig func(config.Config) error,
 	knowledgeFiles []string,
 ) model {
 	homeItems := []list.Item{
@@ -157,7 +173,7 @@ func newModel(
 		homeItem{title: "Enhance Prompt", description: "Improve an existing prompt", action: actionEnhance},
 		homeItem{title: "Dataset Status", description: "Inspect CSV/SQLite cache health", action: actionDatasetStatus},
 		homeItem{title: "Knowledge Files", description: "Manage selected knowledge docs", action: actionKnowledge},
-		homeItem{title: "Settings", description: "View provider and mode defaults", action: actionSettings},
+		homeItem{title: "Settings", description: "Edit provider, API key, mode, and paths", action: actionSettings},
 		homeItem{title: "Rebuild Dataset", description: "Force CSV to SQLite rebuild", action: actionRebuild},
 		homeItem{title: "Exit", description: "Quit PromptSensei", action: actionExit},
 	}
@@ -186,15 +202,18 @@ func newModel(
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot))
 	spin.Style = accentStyle
 
-	settingsText := buildSettingsText(cfg)
-	settingsView := viewport.New(80, 14)
-	settingsView.SetContent(settingsText)
+	settings := list.New(buildSettingsItems(cfg), list.NewDefaultDelegate(), 80, 14)
+	settings.Title = "Settings"
+	settings.SetShowHelp(false)
+	settings.SetFilteringEnabled(false)
 
 	return model{
 		ctx:               ctx,
 		promptService:     promptService,
 		datasetService:    datasetService,
 		knowledgeService:  knowledgeService,
+		saveConfig:        saveConfig,
+		configPath:        configPath,
 		cfg:               cfg,
 		screen:            screenBusy,
 		knowledgeReturn:   screenHome,
@@ -203,9 +222,11 @@ func newModel(
 		editor:            editor,
 		datasetView:       viewport.New(80, 14),
 		resultView:        viewport.New(80, 14),
-		settingsView:      settingsView,
+		settingsList:      settings,
+		settingsDraft:     cfg,
 		spin:              spin,
 		mode:              cfg.General.DefaultMode,
+		strict:            cfg.General.StrictBooruValidation,
 		busyMode:          "startup_check",
 		busyLabel:         "Checking dataset cache",
 		busyElapsed:       time.Now(),
@@ -323,6 +344,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.busyTip = rebuildTips[m.tipIndex]
 		}
 		return m, busyTooltipTickCmd()
+	case settingsSavedMsg:
+		if msg.err != nil {
+			m.lastErr = msg.err.Error()
+			return m, nil
+		}
+		m.cfg = m.settingsDraft
+		m.mode = m.cfg.General.DefaultMode
+		m.strict = m.cfg.General.StrictBooruValidation
+		m.notice = "Settings saved and applied."
+		m.lastErr = ""
+		m.settingsDirty = false
+		m.refreshSettingsList()
+		return m, nil
 	}
 
 	switch m.screen {
@@ -381,8 +415,11 @@ func (m model) updateHome(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenKnowledge
 				return m, nil
 			case actionSettings:
-				m.settingsView.SetContent(buildSettingsText(m.cfg))
-				m.settingsView.GotoTop()
+				m.settingsDraft = m.cfg
+				m.settingsDirty = false
+				m.settingsEdit = false
+				m.settingsError = ""
+				m.refreshSettingsList()
 				m.screen = screenSettings
 				return m, nil
 			case actionRebuild:
@@ -421,15 +458,23 @@ func (m model) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.startBusy("enhance", "Generating prompt")
 			m.lastErr = ""
 			return m, tea.Batch(m.spin.Tick, enhanceCmd(m.ctx, m.promptService, *req))
-		case "m":
+		case "ctrl+g":
 			m.mode = nextMode(m.mode)
 			return m, nil
-		case "s":
+		case "ctrl+b":
 			m.strict = !m.strict
 			return m, nil
-		case "k":
+		case "ctrl+k":
 			m.knowledgeReturn = screenEditor
 			m.screen = screenKnowledge
+			return m, nil
+		case "ctrl+t":
+			m.createMode = !m.createMode
+			if m.createMode {
+				m.notice = "Task switched to create mode."
+			} else {
+				m.notice = "Task switched to enhance mode."
+			}
 			return m, nil
 		case "ctrl+l":
 			m.editor.SetValue("")
@@ -509,12 +554,73 @@ func (m model) updateDataset(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.settingsEdit {
+		var cmd tea.Cmd
+		m.settingsInput, cmd = m.settingsInput.Update(msg)
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "esc":
+				m.settingsEdit = false
+				m.settingsError = ""
+				return m, nil
+			case "enter":
+				current, ok := m.selectedSettingItem()
+				if !ok {
+					m.settingsEdit = false
+					m.settingsError = ""
+					return m, nil
+				}
+				next := m.settingsDraft
+				if err := applySettingValue(&next, current.field, m.settingsInput.Value()); err != nil {
+					m.settingsError = err.Error()
+					return m, nil
+				}
+				m.settingsDraft = next
+				m.settingsDirty = m.settingsDraft != m.cfg
+				m.settingsEdit = false
+				m.settingsError = ""
+				m.refreshSettingsList()
+				return m, nil
+			}
+		}
+		return m, cmd
+	}
+
 	var cmd tea.Cmd
-	m.settingsView, cmd = m.settingsView.Update(msg)
+	m.settingsList, cmd = m.settingsList.Update(msg)
 	if key, ok := msg.(tea.KeyMsg); ok {
-		if key.String() == "esc" {
+		switch key.String() {
+		case "esc":
 			m.screen = screenHome
 			return m, nil
+		case "ctrl+r":
+			m.settingsDraft = m.cfg
+			m.settingsDirty = false
+			m.settingsError = ""
+			m.refreshSettingsList()
+			m.notice = "Discarded unsaved settings changes."
+			return m, nil
+		case "ctrl+s":
+			if !m.settingsDirty {
+				m.notice = "No settings changes to save."
+				return m, nil
+			}
+			if m.saveConfig == nil {
+				m.cfg = m.settingsDraft
+				m.mode = m.cfg.General.DefaultMode
+				m.strict = m.cfg.General.StrictBooruValidation
+				m.settingsDirty = false
+				m.refreshSettingsList()
+				m.notice = "Settings updated in session."
+				return m, nil
+			}
+			return m, saveSettingsCmd(m.saveConfig, m.settingsDraft)
+		case "enter":
+			return m.activateOrEditSetting(1)
+		case "right", "l", " ":
+			return m.activateOrEditSetting(1)
+		case "left", "h":
+			return m.activateOrEditSetting(-1)
 		}
 	}
 	return m, cmd
@@ -567,7 +673,7 @@ func (m model) View() string {
 	body := ""
 	switch m.screen {
 	case screenHome:
-		body = panelStyle.Render(m.homeList.View())
+		body = panelStyle.Render(m.renderHome())
 	case screenEditor:
 		body = panelStyle.Render(m.renderEditor())
 	case screenKnowledge:
@@ -592,9 +698,11 @@ func (m *model) resizeComponents() {
 	}
 
 	listWidth := max(45, m.width-8)
+	homeWidth := max(34, int(float64(listWidth)*0.6))
 	listHeight := max(10, m.height-14)
-	m.homeList.SetSize(listWidth, listHeight)
+	m.homeList.SetSize(homeWidth, listHeight)
 	m.knowledgeList.SetSize(listWidth, listHeight)
+	m.settingsList.SetSize(listWidth, listHeight)
 	m.editor.SetWidth(max(40, m.width-14))
 	m.editor.SetHeight(max(8, m.height-20))
 
@@ -604,8 +712,30 @@ func (m *model) resizeComponents() {
 	m.datasetView.Height = viewportHeight
 	m.resultView.Width = viewportWidth
 	m.resultView.Height = viewportHeight
-	m.settingsView.Width = viewportWidth
-	m.settingsView.Height = viewportHeight
+}
+
+func (m model) renderHome() string {
+	summaryLines := []string{
+		accentStyle.Render("Session"),
+		fmt.Sprintf("Mode: %s", m.mode),
+		fmt.Sprintf("Task: %s", ternary(m.createMode, "Create", "Enhance")),
+		fmt.Sprintf("Strict validation: %t", m.strict),
+		fmt.Sprintf("Provider: %s (enabled=%t)", strings.TrimSpace(m.cfg.Provider.Name), m.cfg.Provider.Enabled),
+		fmt.Sprintf("Model: %s", strings.TrimSpace(m.cfg.Provider.Model)),
+		fmt.Sprintf("Knowledge selected: %d", len(m.selectedKnowledge)),
+		"",
+		accentStyle.Render("Navigation"),
+		fmt.Sprintf("%s move  %s select", keyStyle.Render("j/k or arrows"), keyStyle.Render("enter")),
+		fmt.Sprintf("%s open TUI settings editor", keyStyle.Render("Settings")),
+	}
+
+	left := m.homeList.View()
+	rightWidth := max(26, m.width-46)
+	right := lipgloss.NewStyle().
+		Width(rightWidth).
+		Render(strings.Join(summaryLines, "\n"))
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
 }
 
 func (m model) renderEditor() string {
@@ -630,11 +760,12 @@ func (m model) renderEditor() string {
 		"",
 		helpStyle.Render(
 			fmt.Sprintf(
-				"%s submit  %s mode  %s strict  %s knowledge  %s clear  %s back",
+				"%s submit  %s mode  %s strict  %s task  %s knowledge  %s clear  %s back",
 				keyStyle.Render("ctrl+s"),
-				keyStyle.Render("m"),
-				keyStyle.Render("s"),
-				keyStyle.Render("k"),
+				keyStyle.Render("ctrl+g"),
+				keyStyle.Render("ctrl+b"),
+				keyStyle.Render("ctrl+t"),
+				keyStyle.Render("ctrl+k"),
 				keyStyle.Render("ctrl+l"),
 				keyStyle.Render("esc"),
 			),
@@ -672,10 +803,50 @@ func (m model) renderDataset() string {
 }
 
 func (m model) renderSettings() string {
+	if m.settingsEdit {
+		prompt := "Enter new value and press enter."
+		if m.settingsError != "" {
+			prompt = errorStyle.Render(m.settingsError)
+		}
+		lines := []string{
+			"Edit setting",
+			"",
+			m.settingsInput.View(),
+			"",
+			prompt,
+			"",
+			helpStyle.Render(fmt.Sprintf("%s apply  %s cancel", keyStyle.Render("enter"), keyStyle.Render("esc"))),
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	selectedDesc := ""
+	if item, ok := m.selectedSettingItem(); ok {
+		selectedDesc = item.field.description
+	}
+	dirtyState := "clean"
+	if m.settingsDirty {
+		dirtyState = "unsaved changes"
+	}
+
 	lines := []string{
-		m.settingsView.View(),
+		fmt.Sprintf("Config file: %s", m.configPath),
+		fmt.Sprintf("Draft state: %s", accentStyle.Render(dirtyState)),
 		"",
-		helpStyle.Render(fmt.Sprintf("%s back", keyStyle.Render("esc"))),
+		m.settingsList.View(),
+		"",
+		"Selected: " + selectedDesc,
+		"",
+		helpStyle.Render(
+			fmt.Sprintf(
+				"%s edit/toggle  %s cycle back  %s save  %s reload  %s back",
+				keyStyle.Render("enter/space/right"),
+				keyStyle.Render("left"),
+				keyStyle.Render("ctrl+s"),
+				keyStyle.Render("ctrl+r"),
+				keyStyle.Render("esc"),
+			),
+		),
 	}
 	return strings.Join(lines, "\n")
 }
@@ -725,6 +896,9 @@ func (m model) renderBusy() string {
 func (m model) renderFooter() string {
 	parts := []string{
 		helpStyle.Render(fmt.Sprintf("%s quit", keyStyle.Render("ctrl+c"))),
+	}
+	if m.screen == screenSettings && m.settingsDirty {
+		parts = append(parts, noticeStyle.Render("Unsaved settings changes"))
 	}
 	if m.notice != "" {
 		parts = append(parts, noticeStyle.Render(m.notice))
@@ -780,6 +954,69 @@ func (m *model) startRebuildCmd(origin string, label string) tea.Cmd {
 	)
 }
 
+func (m *model) refreshSettingsList() {
+	items := buildSettingsItems(m.settingsDraft)
+	m.settingsList.SetItems(items)
+	if len(items) == 0 {
+		return
+	}
+	idx := m.settingsList.Index()
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(items) {
+		idx = len(items) - 1
+	}
+	m.settingsList.Select(idx)
+}
+
+func (m model) selectedSettingItem() (settingItem, bool) {
+	item, ok := m.settingsList.SelectedItem().(settingItem)
+	if !ok {
+		return settingItem{}, false
+	}
+	return item, true
+}
+
+func (m model) activateOrEditSetting(direction int) (tea.Model, tea.Cmd) {
+	current, ok := m.selectedSettingItem()
+	if !ok {
+		return m, nil
+	}
+
+	next := m.settingsDraft
+	changed, err := cycleSettingValue(&next, current.field, direction)
+	if err != nil {
+		m.lastErr = err.Error()
+		return m, nil
+	}
+	if changed {
+		m.settingsDraft = next
+		m.settingsDirty = m.settingsDraft != m.cfg
+		m.settingsError = ""
+		m.refreshSettingsList()
+		return m, nil
+	}
+	if direction < 0 {
+		return m, nil
+	}
+
+	input := textinput.New()
+	input.SetValue(rawSettingValue(m.settingsDraft, current.field.key))
+	input.Width = max(30, m.width-20)
+	input.Placeholder = "Enter value..."
+	if current.field.kind == settingKindSecret {
+		input.EchoMode = textinput.EchoPassword
+		input.EchoCharacter = '*'
+	}
+	input.Focus()
+
+	m.settingsInput = input
+	m.settingsEdit = true
+	m.settingsError = ""
+	return m, nil
+}
+
 func (m model) selectedKnowledgeList() []string {
 	out := make([]string, 0, len(m.selectedKnowledge))
 	for name := range m.selectedKnowledge {
@@ -808,6 +1045,16 @@ func enhanceCmd(ctx context.Context, service *services.PromptService, req domain
 			warnings: warnings,
 			err:      err,
 		}
+	}
+}
+
+func saveSettingsCmd(saveFn func(config.Config) error, cfg config.Config) tea.Cmd {
+	return func() tea.Msg {
+		if saveFn == nil {
+			return settingsSavedMsg{}
+		}
+		err := saveFn(cfg)
+		return settingsSavedMsg{err: err}
 	}
 }
 
@@ -880,6 +1127,7 @@ func buildResultText(result *domain.EnhanceResult, warnings []string) string {
 		result.Output,
 		"",
 		fmt.Sprintf("Provider: %s (used=%t)", result.ProviderName, result.UsedProvider),
+		fmt.Sprintf("Prompt chain: applied=%t stages=%d", result.ChainApplied, result.ChainStages),
 		fmt.Sprintf("Validation applied: %t", result.ValidationApplied),
 		"",
 		"Retrieval Summary",
@@ -927,33 +1175,6 @@ func buildDatasetText(status services.DatasetStatus) string {
 	return strings.Join(lines, "\n")
 }
 
-func buildSettingsText(cfg config.Config) string {
-	maskedKey := "(empty)"
-	if strings.TrimSpace(cfg.Provider.APIKey) != "" {
-		maskedKey = "********"
-	}
-	lines := []string{
-		"Settings",
-		"--------",
-		fmt.Sprintf("default mode: %s", cfg.General.DefaultMode),
-		fmt.Sprintf("strict booru validation: %t", cfg.General.StrictBooruValidation),
-		fmt.Sprintf("preferred provider: %s", cfg.General.PreferredProvider),
-		fmt.Sprintf("preferred model: %s", cfg.General.PreferredModel),
-		"",
-		"Provider",
-		"--------",
-		fmt.Sprintf("enabled: %t", cfg.Provider.Enabled),
-		fmt.Sprintf("name: %s", cfg.Provider.Name),
-		fmt.Sprintf("model: %s", cfg.Provider.Model),
-		fmt.Sprintf("api base url: %s", cfg.Provider.APIBaseURL),
-		fmt.Sprintf("api key: %s", maskedKey),
-		fmt.Sprintf("temperature: %.2f", cfg.Provider.Temperature),
-		fmt.Sprintf("max tokens: %d", cfg.Provider.MaxTokens),
-		fmt.Sprintf("timeout seconds: %d", cfg.Provider.TimeoutSeconds),
-	}
-	return strings.Join(lines, "\n")
-}
-
 func busyStageLabel(stage string) string {
 	switch stage {
 	case "load_tags":
@@ -993,4 +1214,11 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func ternary[T any](cond bool, left T, right T) T {
+	if cond {
+		return left
+	}
+	return right
 }

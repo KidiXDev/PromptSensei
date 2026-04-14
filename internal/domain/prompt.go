@@ -42,4 +42,6 @@ type EnhanceResult struct {
 	ProviderName      string
 	UsedProvider      bool
 	ValidationApplied bool
+	ChainApplied      bool
+	ChainStages       int
 }

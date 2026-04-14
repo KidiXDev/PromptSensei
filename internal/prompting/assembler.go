@@ -27,6 +27,7 @@ func Assemble(in AssemblyInput) AssemblyOutput {
 		strings.TrimSpace(in.SystemRules),
 		strings.TrimSpace(in.Persona),
 		"Mode rules: " + modeRules(in.Mode),
+		"Technique stack: intent preservation, retrieval grounding, conflict avoidance, concise output shaping.",
 		outputContract(),
 	}
 
@@ -48,19 +49,36 @@ func Assemble(in AssemblyInput) AssemblyOutput {
 	}
 
 	userPrompt := fmt.Sprintf(
-		"%s\n\nUser input:\n%s\n\nRetrieval context:\n%s\n%s\n%s\n%s",
+		"%s\n\nUser input:\n%s\n\nRetrieval context:\n%s\n%s\n%s\n%s\n\nPrompt checks:\n%s",
 		intent,
 		strings.TrimSpace(in.UserPrompt),
 		confirmed,
 		character,
 		suggested,
 		rejected,
+		strings.Join(promptChecks(in.Mode), "\n"),
 	)
 
 	return AssemblyOutput{
 		SystemPrompt: strings.Join(systemParts, "\n\n"),
 		UserPrompt:   userPrompt,
 	}
+}
+
+func promptChecks(mode domain.Mode) []string {
+	checks := []string{
+		"- Keep core subject and scene intent from user input.",
+		"- Prefer high-confidence retrieved tags over speculative tags.",
+		"- Remove contradictory or duplicate descriptors.",
+		"- Maintain stable style and composition details.",
+	}
+	if mode == domain.ModeBooru {
+		checks = append(checks, "- Output must remain booru tag style only.")
+	}
+	if mode == domain.ModeHybrid {
+		checks = append(checks, "- Keep natural language concise before/around tags.")
+	}
+	return checks
 }
 
 func tagsToLine(label string, tags []domain.TagCandidate) string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/kidixdev/PromptSensei/internal/config"
 	"github.com/kidixdev/PromptSensei/internal/dataset/index"
@@ -11,6 +12,7 @@ import (
 )
 
 type DatasetService struct {
+	mu    sync.RWMutex
 	cfg   config.Config
 	paths config.DatasetPaths
 }
@@ -42,15 +44,28 @@ func NewDatasetService(cfg config.Config) *DatasetService {
 	}
 }
 
+func (s *DatasetService) UpdateConfig(cfg config.Config) {
+	s.mu.Lock()
+	s.cfg = cfg
+	s.paths = cfg.DatasetPaths()
+	s.mu.Unlock()
+}
+
 func (s *DatasetService) EnsureFresh(ctx context.Context) (bool, []string, error) {
-	decision, err := index.ShouldRebuild(s.paths, s.paths.MetadataPath, s.paths.DBPath, s.cfg.Dataset.SchemaVersion)
+	s.mu.RLock()
+	paths := s.paths
+	schemaVersion := s.cfg.Dataset.SchemaVersion
+	autoRebuild := s.cfg.Dataset.AutoRebuildOnCSVChange
+	s.mu.RUnlock()
+
+	decision, err := index.ShouldRebuild(paths, paths.MetadataPath, paths.DBPath, schemaVersion)
 	if err != nil {
 		return false, nil, err
 	}
 	if !decision.Needed {
 		return false, nil, nil
 	}
-	if !s.cfg.Dataset.AutoRebuildOnCSVChange {
+	if !autoRebuild {
 		return false, decision.Reasons, nil
 	}
 
@@ -61,7 +76,12 @@ func (s *DatasetService) EnsureFresh(ctx context.Context) (bool, []string, error
 }
 
 func (s *DatasetService) NeedsRebuild() (bool, []string, error) {
-	decision, err := index.ShouldRebuild(s.paths, s.paths.MetadataPath, s.paths.DBPath, s.cfg.Dataset.SchemaVersion)
+	s.mu.RLock()
+	paths := s.paths
+	schemaVersion := s.cfg.Dataset.SchemaVersion
+	s.mu.RUnlock()
+
+	decision, err := index.ShouldRebuild(paths, paths.MetadataPath, paths.DBPath, schemaVersion)
 	if err != nil {
 		return false, nil, err
 	}
@@ -69,6 +89,8 @@ func (s *DatasetService) NeedsRebuild() (bool, []string, error) {
 }
 
 func (s *DatasetService) AutoRebuildEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.Dataset.AutoRebuildOnCSVChange
 }
 
@@ -77,7 +99,12 @@ func (s *DatasetService) Rebuild(ctx context.Context) (index.Metadata, error) {
 }
 
 func (s *DatasetService) RebuildWithProgress(ctx context.Context, onProgress func(DatasetRebuildProgress)) (index.Metadata, error) {
-	meta, err := index.BuildWithProgress(ctx, s.paths, s.cfg.Dataset.SchemaVersion, func(p index.Progress) {
+	s.mu.RLock()
+	paths := s.paths
+	schemaVersion := s.cfg.Dataset.SchemaVersion
+	s.mu.RUnlock()
+
+	meta, err := index.BuildWithProgress(ctx, paths, schemaVersion, func(p index.Progress) {
 		if onProgress == nil {
 			return
 		}
@@ -91,40 +118,48 @@ func (s *DatasetService) RebuildWithProgress(ctx context.Context, onProgress fun
 	if err != nil {
 		return index.Metadata{}, err
 	}
-	if err := index.SaveMetadata(s.paths.MetadataPath, meta); err != nil {
+	if err := index.SaveMetadata(paths.MetadataPath, meta); err != nil {
 		return index.Metadata{}, err
 	}
 	return meta, nil
 }
 
 func (s *DatasetService) OpenRepository() (*sqlite.Repository, error) {
-	return sqlite.Open(s.paths.DBPath)
+	s.mu.RLock()
+	dbPath := s.paths.DBPath
+	s.mu.RUnlock()
+	return sqlite.Open(dbPath)
 }
 
 func (s *DatasetService) Status(ctx context.Context) (DatasetStatus, error) {
-	decision, err := index.ShouldRebuild(s.paths, s.paths.MetadataPath, s.paths.DBPath, s.cfg.Dataset.SchemaVersion)
+	s.mu.RLock()
+	paths := s.paths
+	schemaVersion := s.cfg.Dataset.SchemaVersion
+	s.mu.RUnlock()
+
+	decision, err := index.ShouldRebuild(paths, paths.MetadataPath, paths.DBPath, schemaVersion)
 	if err != nil {
 		return DatasetStatus{}, err
 	}
-	meta, err := index.LoadMetadata(s.paths.MetadataPath)
+	meta, err := index.LoadMetadata(paths.MetadataPath)
 	if err != nil {
 		return DatasetStatus{}, err
 	}
 
 	status := DatasetStatus{
-		Paths:            s.paths,
-		MetadataPath:     s.paths.MetadataPath,
-		SchemaVersion:    s.cfg.Dataset.SchemaVersion,
+		Paths:            paths,
+		MetadataPath:     paths.MetadataPath,
+		SchemaVersion:    schemaVersion,
 		RebuildNeeded:    decision.Needed,
 		RebuildReasons:   decision.Reasons,
 		Metadata:         meta,
-		TagCSVPresent:    fileExists(s.paths.TagCSV),
-		CharacterPresent: fileExists(s.paths.CharacterCSV),
-		HasDatabase:      fileExists(s.paths.DBPath),
+		TagCSVPresent:    fileExists(paths.TagCSV),
+		CharacterPresent: fileExists(paths.CharacterCSV),
+		HasDatabase:      fileExists(paths.DBPath),
 	}
 
 	if status.HasDatabase {
-		repo, err := sqlite.Open(s.paths.DBPath)
+		repo, err := sqlite.Open(paths.DBPath)
 		if err != nil {
 			return DatasetStatus{}, fmt.Errorf("open sqlite: %w", err)
 		}

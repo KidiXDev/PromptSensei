@@ -11,6 +11,7 @@ import (
 
 	"github.com/kidixdev/PromptSensei/internal/config"
 	"github.com/kidixdev/PromptSensei/internal/domain"
+	"github.com/kidixdev/PromptSensei/internal/logging"
 )
 
 type Client struct {
@@ -45,6 +46,7 @@ func (c *Client) Generate(ctx context.Context, req domain.GenerateRequest) (*dom
 	if c.apiKey == "" {
 		return nil, fmt.Errorf("nanogpt api_key is empty")
 	}
+	logging.Debug("nanogpt request", "url", c.baseURL+"/chat/completions", "model", req.Model, "temperature", req.Temperature, "max_tokens", req.MaxTokens)
 
 	payload := map[string]any{
 		"model": req.Model,
@@ -80,6 +82,7 @@ func (c *Client) Generate(ctx context.Context, req domain.GenerateRequest) (*dom
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		return nil, err
 	}
+	logging.Debug("nanogpt response status", "status_code", resp.StatusCode, "status", resp.Status)
 	if resp.StatusCode >= 400 {
 		msg := strings.TrimSpace(parsed.Error.Message)
 		if msg == "" {

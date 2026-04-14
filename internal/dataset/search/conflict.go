@@ -1,6 +1,7 @@
 package search
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/kidixdev/PromptSensei/internal/domain"
@@ -9,20 +10,14 @@ import (
 
 var conflictGroups = [][]string{
 	{"1girl", "1boy", "1other"},
-	{"solo", "multiple_girls", "multiple_boys"},
+	{"solo", "multiple_girls", "multiple_boys", "multiple_others"},
 	{"day", "night"},
+	{"safe", "questionable", "explicit"},
+	{"indoors", "outdoors"},
 }
 
 func applyConflicts(prompt string, input []domain.TagCandidate) ([]domain.TagCandidate, []domain.RejectedTag) {
-	promptNorm := utils.NormalizeForLookup(prompt)
-	explicit := map[string]struct{}{}
-	for _, group := range conflictGroups {
-		for _, tag := range group {
-			if strings.Contains(promptNorm, utils.NormalizeForLookup(tag)) {
-				explicit[tag] = struct{}{}
-			}
-		}
-	}
+	explicit := extractExplicitConflictTags(prompt)
 
 	var filtered []domain.TagCandidate
 	var rejected []domain.RejectedTag
@@ -69,5 +64,31 @@ func applyConflicts(prompt string, input []domain.TagCandidate) ([]domain.TagCan
 	for _, v := range present {
 		filtered = append(filtered, v)
 	}
+	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].Score == filtered[j].Score {
+			return filtered[i].PostCount > filtered[j].PostCount
+		}
+		return filtered[i].Score > filtered[j].Score
+	})
 	return filtered, rejected
+}
+
+func extractExplicitConflictTags(prompt string) map[string]struct{} {
+	promptNorm := " " + utils.NormalizeForLookup(prompt) + " "
+	explicit := map[string]struct{}{}
+
+	for _, tag := range utils.SplitList(prompt) {
+		explicit[tag] = struct{}{}
+	}
+
+	for _, group := range conflictGroups {
+		for _, tag := range group {
+			normalizedTag := " " + utils.NormalizeForLookup(strings.ReplaceAll(tag, "_", " ")) + " "
+			if strings.Contains(promptNorm, normalizedTag) {
+				explicit[tag] = struct{}{}
+			}
+		}
+	}
+
+	return explicit
 }

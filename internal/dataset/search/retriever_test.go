@@ -60,6 +60,35 @@ func TestRetrieverFindsCharacterAndTags(t *testing.T) {
 	}
 }
 
+func TestBuildTermWeightsIncludesPhrases(t *testing.T) {
+	weights := buildTermWeights("hatsune miku, neon city street at night")
+	if weights["hatsune miku"] <= 0 {
+		t.Fatalf("expected phrase weight for hatsune miku")
+	}
+	if weights["city street at"] <= 0 {
+		t.Fatalf("expected trigram term weight")
+	}
+	if weights["neon city street at night"] <= 0 {
+		t.Fatalf("expected full phrase term weight")
+	}
+}
+
+func TestApplyConflictsPrefersExplicitPromptTag(t *testing.T) {
+	filtered, rejected := applyConflicts("night city skyline", []domain.TagCandidate{
+		{Name: "day", Score: 4.2, PostCount: 200},
+		{Name: "night", Score: 3.1, PostCount: 100},
+	})
+	if containsTag(filtered, "day") {
+		t.Fatalf("expected day tag to be rejected due to conflict")
+	}
+	if !containsTag(filtered, "night") {
+		t.Fatalf("expected explicit night tag to remain")
+	}
+	if len(rejected) == 0 {
+		t.Fatalf("expected rejected tags")
+	}
+}
+
 func containsTag(tags []domain.TagCandidate, name string) bool {
 	for _, t := range tags {
 		if t.Name == name {

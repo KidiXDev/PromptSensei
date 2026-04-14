@@ -9,10 +9,18 @@ import (
 
 	"github.com/kidixdev/PromptSensei/internal/config"
 	"github.com/kidixdev/PromptSensei/internal/domain"
+	"github.com/kidixdev/PromptSensei/internal/logging"
 	"github.com/kidixdev/PromptSensei/internal/tui"
 )
 
 func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
+	if err := logging.Init(); err != nil {
+		fmt.Fprintf(errOut, "warning: logger init failed: %v\n", err)
+	} else {
+		fmt.Fprintf(out, "debug logging enabled: %s\n", logging.Path())
+		logging.Info("application start", "args", strings.Join(args, " "))
+	}
+
 	if len(args) >= 2 && args[0] == "config" && args[1] == "init" {
 		paths, err := config.ResolvePaths()
 		if err != nil {
@@ -49,7 +57,25 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errOut
 	}
 
 	if isTUI {
-		if err := tui.Run(ctx, runtime.Prompt, runtime.Dataset, runtime.Knowledge, runtime.Config, in, out); err != nil {
+		saveConfig := func(next config.Config) error {
+			prev := runtime.Config
+			if err := runtime.Providers.UpdateConfig(next.Provider); err != nil {
+				return err
+			}
+			runtime.Dataset.UpdateConfig(next)
+			runtime.Prompt.UpdateConfig(next)
+
+			if err := config.Save(runtime.Paths, next); err != nil {
+				_ = runtime.Providers.UpdateConfig(prev.Provider)
+				runtime.Dataset.UpdateConfig(prev)
+				runtime.Prompt.UpdateConfig(prev)
+				return err
+			}
+			runtime.Config = next
+			return nil
+		}
+
+		if err := tui.Run(ctx, runtime.Prompt, runtime.Dataset, runtime.Knowledge, runtime.Paths.ConfigFile, runtime.Config, saveConfig, in, out); err != nil {
 			fmt.Fprintf(errOut, "error: %v\n", err)
 			return 1
 		}
