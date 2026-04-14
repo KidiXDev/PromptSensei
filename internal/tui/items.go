@@ -16,18 +16,20 @@ type knowledgeItem struct {
 }
 
 func (i knowledgeItem) Title() string {
-	prefix := "  "
+	checkbox := "[ ] "
+	style := checkboxStyle
 	if i.selected {
-		prefix = "x "
+		checkbox = "[x] "
+		style = selectedCheckboxStyle
 	}
-	return prefix + i.name
+	return style.Render(checkbox) + i.name
 }
 
 func (i knowledgeItem) Description() string {
 	if i.selected {
-		return "selected"
+		return "Enabled - will be context-loaded during prompt generation"
 	}
-	return "available"
+	return "Available"
 }
 
 func (i knowledgeItem) FilterValue() string { return i.name }

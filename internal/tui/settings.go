@@ -58,7 +58,35 @@ type settingItem struct {
 }
 
 func (i settingItem) Title() string {
-	return fmt.Sprintf("[%s] %s: %s", i.field.group, i.field.title, i.value)
+	var valStr string
+	switch i.field.kind {
+	case settingKindBool:
+		if strings.EqualFold(i.value, "true") {
+			valStr = selectedCheckboxStyle.Render("● ON")
+		} else {
+			valStr = checkboxStyle.Render("○ OFF")
+		}
+	case settingKindEnum:
+		valStr = highlightStyle.Render("‹ " + i.value + " ›")
+	case settingKindFloat:
+		// Slider-like representation for temperature (0.00 - 2.00)
+		if i.field.key == settingProviderTemperature {
+			val, _ := strconv.ParseFloat(i.value, 64)
+			blocks := int(val * 5) // 0-10 blocks
+			slider := "[" + strings.Repeat("■", blocks) + strings.Repeat("·", 10-blocks) + "]"
+			valStr = accentStyle.Render(slider) + " " + i.value
+		} else {
+			valStr = accentStyle.Render(i.value)
+		}
+	case settingKindInt:
+		valStr = accentStyle.Render(i.value)
+	case settingKindSecret:
+		valStr = helpStyle.Render(i.value)
+	default:
+		valStr = i.value
+	}
+
+	return fmt.Sprintf("%-28s %s", i.field.title, valStr)
 }
 
 func (i settingItem) Description() string {

@@ -288,7 +288,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastErr = ""
 		m.notice = "Prompt generated successfully."
 		m.clearBusyState()
-		m.resultView.SetContent(buildResultText(msg.result, msg.warnings))
+		m.resultView.SetContent(buildResultText(msg.result, msg.warnings, m.resultView.Width))
 		m.resultView.GotoTop()
 		m.screen = screenResult
 		return m, nil
@@ -722,46 +722,58 @@ func (m *model) resizeComponents() {
 }
 
 func (m model) renderHome() string {
-	summaryLines := []string{
-		accentStyle.Render("Session"),
-		fmt.Sprintf("Mode: %s", m.mode),
-		fmt.Sprintf("Task: %s", ternary(m.createMode, "Create", "Enhance")),
-		fmt.Sprintf("Strict validation: %t", m.strict),
-		fmt.Sprintf("Provider: %s (enabled=%t)", strings.TrimSpace(m.cfg.Provider.Name), m.cfg.Provider.Enabled),
-		fmt.Sprintf("Model: %s", strings.TrimSpace(m.cfg.Provider.Model)),
-		fmt.Sprintf("Knowledge selected: %d", len(m.selectedKnowledge)),
+
+	// Info section
+	infoLines := []string{
+		accentStyle.Render("SESSION CONTEXT"),
+		fmt.Sprintf("  Mode:     %s", highlightStyle.Render(string(m.mode))),
+		fmt.Sprintf("  Task:     %s", ternary(m.createMode, noticeStyle.Render("Create"), accentStyle.Render("Enhance"))),
+		fmt.Sprintf("  Strict:   %s", ternary(m.strict, noticeStyle.Render("Enabled"), helpStyle.Render("Disabled"))),
 		"",
-		accentStyle.Render("Navigation"),
-		fmt.Sprintf("%s move  %s select", keyStyle.Render("j/k or arrows"), keyStyle.Render("enter")),
-		fmt.Sprintf("%s open TUI settings editor", keyStyle.Render("Settings")),
+		accentStyle.Render("ACTIVE PROVIDER"),
+		fmt.Sprintf("  Name:     %s", m.cfg.Provider.Name),
+		fmt.Sprintf("  Model:    %s", m.cfg.Provider.Model),
+		"",
+		accentStyle.Render("KNOWLEDGE"),
+		fmt.Sprintf("  Selected: %d files", len(m.selectedKnowledge)),
 	}
 
 	left := m.homeList.View()
-	rightWidth := max(26, m.width-46)
+	// Calculate right width based on actual component sizes
+	rightWidth := max(30, m.width-m.homeList.Width()-10)
 	right := lipgloss.NewStyle().
+		MarginLeft(4).
+		Padding(1, 2).
+		Border(lipgloss.NormalBorder(), false, false, false, true).
+		BorderForeground(lipgloss.Color("238")).
 		Width(rightWidth).
-		Render(strings.Join(summaryLines, "\n"))
+		Render(strings.Join(infoLines, "\n"))
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+
+	return content
 }
 
 func (m model) renderEditor() string {
-	modeLabel := accentStyle.Render(string(m.mode))
-	modeType := "Enhance"
-	if m.createMode {
-		modeType = "Create"
-	}
+	header := highlightStyle.Render("✍ PROMPT CRAFTING")
+	
+	modeType := ternary(m.createMode, noticeStyle.Render("CREATE"), accentStyle.Render("ENHANCE"))
+	
+	info := fmt.Sprintf("Task: %s  |  Mode: %s  |  Strict: %s", 
+		modeType, 
+		accentStyle.Render(string(m.mode)), 
+		ternary(m.strict, noticeStyle.Render("ON"), helpStyle.Render("OFF")))
 
-	knowledge := "(none)"
+	knowledge := "None"
 	selected := m.selectedKnowledgeList()
 	if len(selected) > 0 {
 		knowledge = strings.Join(selected, ", ")
 	}
 
 	lines := []string{
-		fmt.Sprintf("Task: %s", accentStyle.Render(modeType)),
-		fmt.Sprintf("Mode: %s  Strict: %t", modeLabel, m.strict),
-		"Knowledge: " + knowledge,
+		header,
+		info,
+		"Knowledge: " + helpStyle.Render(knowledge),
 		"",
 		m.editor.View(),
 		"",
@@ -782,8 +794,12 @@ func (m model) renderEditor() string {
 }
 
 func (m model) renderKnowledge() string {
+	header := highlightStyle.Render("📚 KNOWLEDGE SELECTION")
+	info := helpStyle.Render("Select files to include in the generation context.")
+
 	lines := []string{
-		"Select knowledge files used during prompt assembly.",
+		header,
+		info,
 		"",
 		m.knowledgeList.View(),
 		"",
@@ -801,10 +817,14 @@ func (m model) renderKnowledge() string {
 }
 
 func (m model) renderDataset() string {
+	header := highlightStyle.Render("📊 DATASET EXPLORER")
+	
 	lines := []string{
+		header,
+		"",
 		m.datasetView.View(),
 		"",
-		helpStyle.Render(fmt.Sprintf("%s rebuild  %s back", keyStyle.Render("r"), keyStyle.Render("esc"))),
+		helpStyle.Render(fmt.Sprintf("%s rebuild cache  %s back", keyStyle.Render("r"), keyStyle.Render("esc"))),
 	}
 	return strings.Join(lines, "\n")
 }
@@ -816,7 +836,7 @@ func (m model) renderSettings() string {
 			prompt = errorStyle.Render(m.settingsError)
 		}
 		lines := []string{
-			"Edit setting",
+			accentStyle.Render("EDIT SETTING"),
 			"",
 			m.settingsInput.View(),
 			"",
@@ -831,24 +851,27 @@ func (m model) renderSettings() string {
 	if item, ok := m.selectedSettingItem(); ok {
 		selectedDesc = item.field.description
 	}
-	dirtyState := "clean"
+	
+	header := highlightStyle.Render("⚙ CONFIGURATION")
+	
+	statusLine := fmt.Sprintf("Path: %s", helpStyle.Render(m.configPath))
 	if m.settingsDirty {
-		dirtyState = "unsaved changes"
+		statusLine += " " + warningStyle.Render("[UNSAVED CHANGES]")
 	}
 
 	lines := []string{
-		fmt.Sprintf("Config file: %s", m.configPath),
-		fmt.Sprintf("Draft state: %s", accentStyle.Render(dirtyState)),
+		header,
+		statusLine,
 		"",
 		m.settingsList.View(),
 		"",
-		"Selected: " + selectedDesc,
+		accentStyle.Render("HELP") + " " + helpStyle.Render(selectedDesc),
 		"",
 		helpStyle.Render(
 			fmt.Sprintf(
-				"%s edit/toggle  %s cycle back  %s save  %s reload  %s back",
-				keyStyle.Render("enter/space/right"),
-				keyStyle.Render("left"),
+				"%s edit/toggle  %s cycles  %s save  %s reset  %s back",
+				keyStyle.Render("enter/space"),
+				keyStyle.Render("←/→"),
 				keyStyle.Render("ctrl+s"),
 				keyStyle.Render("ctrl+r"),
 				keyStyle.Render("esc"),
@@ -859,7 +882,15 @@ func (m model) renderSettings() string {
 }
 
 func (m model) renderResult() string {
-	lines := []string{
+	if m.lastResult == nil {
+		return "No result available."
+	}
+
+	header := highlightStyle.Render("✨ GENERATED PROMPT")
+	
+	return lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		"",
 		m.resultView.View(),
 		"",
 		helpStyle.Render(
@@ -871,32 +902,279 @@ func (m model) renderResult() string {
 				keyStyle.Render("esc"),
 			),
 		),
+	)
+}
+
+func buildResultText(result *domain.EnhanceResult, warnings []string, width int) string {
+	if result == nil {
+		return "No result available."
+	}
+
+	// Main Prompt Panel
+	promptContent := promptPanelStyle.Width(width - 4).Render(formatPromptForDisplay(result.Output, width-8))
+
+	// Technical sub-section
+	techLines := []string{
+		"",
+		accentStyle.Render("DETAILS"),
+		fmt.Sprintf("  Provider:   %s", result.ProviderName),
+		fmt.Sprintf("  Validated:  %t", result.ValidationApplied),
+		"",
+		accentStyle.Render("RETRIEVAL"),
+		fmt.Sprintf("  Character:  %d", len(result.Retrieval.CharacterTags)),
+		fmt.Sprintf("  Confirmed:  %d", len(result.Retrieval.ConfirmedTags)),
+		fmt.Sprintf("  Suggested:  %d", len(result.Retrieval.SuggestedTags)),
+	}
+
+	if len(warnings) > 0 {
+		techLines = append(techLines, "", warningStyle.Render("WARNINGS"))
+		for _, w := range warnings {
+			techLines = append(techLines, "  - "+w)
+		}
+	}
+
+	techPanel := techInfoStyle.Render(strings.Join(techLines, "\n"))
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		promptContent,
+		techPanel,
+	)
+}
+
+func buildDatasetText(status services.DatasetStatus) string {
+	header := highlightStyle.Render("DATASET SNAPSHOT")
+	
+	lines := []string{
+		header,
+		fmt.Sprintf("Paths: %s, %s", helpStyle.Render(status.Paths.TagCSV), helpStyle.Render(status.Paths.CharacterCSV)),
+		fmt.Sprintf("Cache: %s", helpStyle.Render(status.Paths.DBPath)),
+		"",
+		accentStyle.Render("STATISTICS"),
+		fmt.Sprintf("  Tags:           %d", status.Counts.Tags),
+		fmt.Sprintf("  Aliases:        %d", status.Counts.TagAliases),
+		fmt.Sprintf("  Characters:     %d", status.Counts.Characters),
+		fmt.Sprintf("  Core Tags:      %d", status.Counts.CharacterCoreTags),
+	}
+	
+	if status.RebuildNeeded {
+		lines = append(lines, "", warningStyle.Render("! REBUILD RECOMMENDED"), "Reasons: "+strings.Join(status.RebuildReasons, ", "))
+	}
+	
+	return strings.Join(lines, "\n")
+}
+
+func busyStageLabel(stage string) string {
+	switch stage {
+	case "load_tags":
+		return "Loading tag CSV"
+	case "load_characters":
+		return "Loading character CSV"
+	case "create_schema":
+		return "Creating SQLite schema"
+	case "insert_tags":
+		return "Indexing tags"
+	case "insert_characters":
+		return "Indexing characters"
+	case "commit":
+		return "Committing transaction"
+	case "count_rows":
+		return "Counting indexed rows"
+	case "swap_db":
+		return "Replacing cache database"
+	case "hash_csv":
+		return "Computing CSV hashes"
+	case "done":
+		return "Completed"
+	default:
+		return stage
+	}
+}
+
+func joinReasons(reasons []string) string {
+	if len(reasons) == 0 {
+		return "up-to-date"
+	}
+	return strings.Join(reasons, "; ")
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func ternary[T any](cond bool, left T, right T) T {
+	if cond {
+		return left
+	}
+	return right
+}
+
+func formatPromptForDisplay(prompt string, maxWidth int) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "(empty)"
+	}
+	parts := strings.Split(prompt, ",")
+	lines := make([]string, 0, len(parts))
+	current := ""
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if current == "" {
+			current = part
+			continue
+		}
+		next := current + ", " + part
+		if len(next) > maxWidth {
+			lines = append(lines, current+",")
+			current = part
+			continue
+		}
+		current = next
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	if len(lines) == 0 {
+		return prompt
 	}
 	return strings.Join(lines, "\n")
 }
 
+func nextMode(current domain.Mode) domain.Mode {
+	switch current {
+	case domain.ModeNatural:
+		return domain.ModeBooru
+	case domain.ModeBooru:
+		return domain.ModeHybrid
+	default:
+		return domain.ModeNatural
+	}
+}
+
+func enhanceCmd(ctx context.Context, service *services.PromptService, req domain.EnhanceRequest) tea.Cmd {
+	return func() tea.Msg {
+		result, warnings, err := service.Enhance(ctx, req)
+		return enhanceDoneMsg{
+			result:   result,
+			warnings: warnings,
+			err:      err,
+		}
+	}
+}
+
+func saveSettingsCmd(saveFn func(config.Config) error, cfg config.Config) tea.Cmd {
+	return func() tea.Msg {
+		if saveFn == nil {
+			return settingsSavedMsg{}
+		}
+		err := saveFn(cfg)
+		return settingsSavedMsg{err: err}
+	}
+}
+
+func startupRebuildCheckCmd(_ context.Context, service *services.DatasetService) tea.Cmd {
+	return func() tea.Msg {
+		needed, reasons, err := service.NeedsRebuild()
+		if err != nil {
+			return startupRebuildCheckDoneMsg{err: err}
+		}
+		return startupRebuildCheckDoneMsg{
+			needed:  needed,
+			auto:    service.AutoRebuildEnabled(),
+			reasons: reasons,
+			err:     nil,
+		}
+	}
+}
+
+func datasetStatusCmd(ctx context.Context, service *services.DatasetService) tea.Cmd {
+	return func() tea.Msg {
+		status, err := service.Status(ctx)
+		return datasetStatusDoneMsg{
+			status: status,
+			err:    err,
+		}
+	}
+}
+
+func datasetRebuildCmd(ctx context.Context, service *services.DatasetService, progressCh chan<- services.DatasetRebuildProgress) tea.Cmd {
+	return func() tea.Msg {
+		defer close(progressCh)
+		_, err := service.RebuildWithProgress(ctx, func(p services.DatasetRebuildProgress) {
+			select {
+			case progressCh <- p:
+			default:
+				// Keep UI responsive; dropping a frame is acceptable for high-frequency progress.
+			}
+		})
+		return datasetRebuildDoneMsg{err: err}
+	}
+}
+
+func waitRebuildProgressCmd(progressCh <-chan services.DatasetRebuildProgress) tea.Cmd {
+	return func() tea.Msg {
+		if progressCh == nil {
+			return rebuildProgressClosedMsg{}
+		}
+		p, ok := <-progressCh
+		if !ok {
+			return rebuildProgressClosedMsg{}
+		}
+		return datasetRebuildProgressMsg{progress: p}
+	}
+}
+
+func busyTooltipTickCmd() tea.Cmd {
+	return tea.Tick(900*time.Millisecond, func(_ time.Time) tea.Msg {
+		return busyTooltipTickMsg{}
+	})
+}
 func (m model) renderBusy() string {
+	spin := m.spin.View()
+	label := highlightStyle.Render(m.busyLabel)
+	
 	lines := []string{
-		fmt.Sprintf("%s %s", m.spin.View(), accentStyle.Render(m.busyLabel)),
+		fmt.Sprintf("%s %s", spin, label),
+		"",
 	}
 
 	stage := busyStageLabel(m.busyStage)
 	if stage != "" {
-		lines = append(lines, "Stage: "+stage)
+		lines = append(lines, "Stage:  "+accentStyle.Render(stage))
 	}
-	if m.busyDetail != "" {
-		lines = append(lines, "Detail: "+m.busyDetail)
-	}
+	
 	if m.busyTotal > 0 {
-		percent := float64(m.busyCurrent) / float64(m.busyTotal) * 100
-		lines = append(lines, fmt.Sprintf("Progress: %d/%d (%.1f%%)", m.busyCurrent, m.busyTotal, percent))
+		percent := float64(m.busyCurrent) / float64(m.busyTotal)
+		width := max(20, m.width-20)
+		filled := int(float64(width) * percent)
+		if filled > width {
+			filled = width
+		}
+		
+		bar := selectedCheckboxStyle.Render(strings.Repeat("█", filled)) + 
+		       helpStyle.Render(strings.Repeat("░", width-filled))
+		
+		lines = append(lines, 
+			fmt.Sprintf("Progress: %d / %d", m.busyCurrent, m.busyTotal),
+			bar,
+		)
+	} else if m.busyDetail != "" {
+		lines = append(lines, "Detail: "+helpStyle.Render(m.busyDetail))
 	}
+
 	if !m.busyElapsed.IsZero() {
-		lines = append(lines, fmt.Sprintf("Elapsed: %s", time.Since(m.busyElapsed).Round(100*time.Millisecond)))
+		lines = append(lines, "", fmt.Sprintf("Time: %s", highlightStyle.Render(time.Since(m.busyElapsed).Round(100*time.Millisecond).String())))
 	}
+	
 	if m.busyMode == "rebuild" && m.busyTip != "" {
-		lines = append(lines, "", helpStyle.Render(m.busyTip))
+		lines = append(lines, "", panelStyle.BorderForeground(warningColor).Render(warningStyle.Render("💡 ") + helpStyle.Render(m.busyTip)))
 	}
+	
 	return strings.Join(lines, "\n")
 }
 
@@ -1045,234 +1323,4 @@ func (m *model) syncKnowledgeListSelection() {
 		items[i] = item
 	}
 	m.knowledgeList.SetItems(items)
-}
-
-func nextMode(current domain.Mode) domain.Mode {
-	switch current {
-	case domain.ModeNatural:
-		return domain.ModeBooru
-	case domain.ModeBooru:
-		return domain.ModeHybrid
-	default:
-		return domain.ModeNatural
-	}
-}
-
-func enhanceCmd(ctx context.Context, service *services.PromptService, req domain.EnhanceRequest) tea.Cmd {
-	return func() tea.Msg {
-		result, warnings, err := service.Enhance(ctx, req)
-		return enhanceDoneMsg{
-			result:   result,
-			warnings: warnings,
-			err:      err,
-		}
-	}
-}
-
-func saveSettingsCmd(saveFn func(config.Config) error, cfg config.Config) tea.Cmd {
-	return func() tea.Msg {
-		if saveFn == nil {
-			return settingsSavedMsg{}
-		}
-		err := saveFn(cfg)
-		return settingsSavedMsg{err: err}
-	}
-}
-
-func startupRebuildCheckCmd(_ context.Context, service *services.DatasetService) tea.Cmd {
-	return func() tea.Msg {
-		needed, reasons, err := service.NeedsRebuild()
-		if err != nil {
-			return startupRebuildCheckDoneMsg{err: err}
-		}
-		return startupRebuildCheckDoneMsg{
-			needed:  needed,
-			auto:    service.AutoRebuildEnabled(),
-			reasons: reasons,
-			err:     nil,
-		}
-	}
-}
-
-func datasetStatusCmd(ctx context.Context, service *services.DatasetService) tea.Cmd {
-	return func() tea.Msg {
-		status, err := service.Status(ctx)
-		return datasetStatusDoneMsg{
-			status: status,
-			err:    err,
-		}
-	}
-}
-
-func datasetRebuildCmd(ctx context.Context, service *services.DatasetService, progressCh chan<- services.DatasetRebuildProgress) tea.Cmd {
-	return func() tea.Msg {
-		defer close(progressCh)
-		_, err := service.RebuildWithProgress(ctx, func(p services.DatasetRebuildProgress) {
-			select {
-			case progressCh <- p:
-			default:
-				// Keep UI responsive; dropping a frame is acceptable for high-frequency progress.
-			}
-		})
-		return datasetRebuildDoneMsg{err: err}
-	}
-}
-
-func waitRebuildProgressCmd(progressCh <-chan services.DatasetRebuildProgress) tea.Cmd {
-	return func() tea.Msg {
-		if progressCh == nil {
-			return rebuildProgressClosedMsg{}
-		}
-		p, ok := <-progressCh
-		if !ok {
-			return rebuildProgressClosedMsg{}
-		}
-		return datasetRebuildProgressMsg{progress: p}
-	}
-}
-
-func busyTooltipTickCmd() tea.Cmd {
-	return tea.Tick(900*time.Millisecond, func(_ time.Time) tea.Msg {
-		return busyTooltipTickMsg{}
-	})
-}
-
-func buildResultText(result *domain.EnhanceResult, warnings []string) string {
-	if result == nil {
-		return "No result."
-	}
-
-	lines := []string{
-		"Output",
-		"------",
-		formatPromptForDisplay(result.Output, 96),
-		"",
-		fmt.Sprintf("Provider: %s (used=%t)", result.ProviderName, result.UsedProvider),
-		fmt.Sprintf("Validation applied: %t", result.ValidationApplied),
-		"",
-		"Retrieval Summary",
-		"-----------------",
-		fmt.Sprintf("Character tags: %d", len(result.Retrieval.CharacterTags)),
-		fmt.Sprintf("Confirmed tags: %d", len(result.Retrieval.ConfirmedTags)),
-		fmt.Sprintf("Suggested tags: %d", len(result.Retrieval.SuggestedTags)),
-		fmt.Sprintf("Rejected tags: %d", len(result.Retrieval.RejectedTags)),
-	}
-
-	if len(warnings) > 0 {
-		lines = append(lines, "", "Warnings", "--------")
-		for _, w := range warnings {
-			lines = append(lines, "- "+w)
-		}
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func buildDatasetText(status services.DatasetStatus) string {
-	lines := []string{
-		"Dataset Status",
-		"--------------",
-		"tag.csv: " + status.Paths.TagCSV,
-		"character.csv: " + status.Paths.CharacterCSV,
-		"cache db: " + status.Paths.DBPath,
-		"metadata: " + status.MetadataPath,
-		fmt.Sprintf("db exists: %t", status.HasDatabase),
-		fmt.Sprintf("rebuild needed: %t", status.RebuildNeeded),
-	}
-	if len(status.RebuildReasons) > 0 {
-		lines = append(lines, "reasons: "+strings.Join(status.RebuildReasons, "; "))
-	}
-	lines = append(lines,
-		"",
-		"Row Counts",
-		"----------",
-		fmt.Sprintf("tags: %d", status.Counts.Tags),
-		fmt.Sprintf("aliases: %d", status.Counts.TagAliases),
-		fmt.Sprintf("characters: %d", status.Counts.Characters),
-		fmt.Sprintf("character triggers: %d", status.Counts.CharacterTriggers),
-		fmt.Sprintf("character core tags: %d", status.Counts.CharacterCoreTags),
-	)
-	return strings.Join(lines, "\n")
-}
-
-func busyStageLabel(stage string) string {
-	switch stage {
-	case "load_tags":
-		return "Loading tag CSV"
-	case "load_characters":
-		return "Loading character CSV"
-	case "create_schema":
-		return "Creating SQLite schema"
-	case "insert_tags":
-		return "Indexing tags"
-	case "insert_characters":
-		return "Indexing characters"
-	case "commit":
-		return "Committing transaction"
-	case "count_rows":
-		return "Counting indexed rows"
-	case "swap_db":
-		return "Replacing cache database"
-	case "hash_csv":
-		return "Computing CSV hashes"
-	case "done":
-		return "Completed"
-	default:
-		return stage
-	}
-}
-
-func joinReasons(reasons []string) string {
-	if len(reasons) == 0 {
-		return "up-to-date"
-	}
-	return strings.Join(reasons, "; ")
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func ternary[T any](cond bool, left T, right T) T {
-	if cond {
-		return left
-	}
-	return right
-}
-
-func formatPromptForDisplay(prompt string, maxWidth int) string {
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		return "(empty)"
-	}
-	parts := strings.Split(prompt, ",")
-	lines := make([]string, 0, len(parts))
-	current := ""
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if current == "" {
-			current = part
-			continue
-		}
-		next := current + ", " + part
-		if len(next) > maxWidth {
-			lines = append(lines, current+",")
-			current = part
-			continue
-		}
-		current = next
-	}
-	if current != "" {
-		lines = append(lines, current)
-	}
-	if len(lines) == 0 {
-		return prompt
-	}
-	return strings.Join(lines, "\n")
 }
