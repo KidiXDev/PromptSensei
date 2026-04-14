@@ -6,6 +6,7 @@ import (
 
 	"github.com/kidixdev/PromptSensei/internal/config"
 	"github.com/kidixdev/PromptSensei/internal/domain"
+	"github.com/kidixdev/PromptSensei/internal/providers/fireworks"
 	"github.com/kidixdev/PromptSensei/internal/providers/nanogpt"
 	"github.com/kidixdev/PromptSensei/internal/providers/openai"
 	"github.com/kidixdev/PromptSensei/internal/providers/openrouter"
@@ -19,6 +20,8 @@ func BuildProvider(cfg config.ProviderConfig) (domain.Provider, error) {
 		return openrouter.NewClient(cfg), nil
 	case "nanogpt", "nano-gpt":
 		return nanogpt.NewClient(cfg), nil
+	case "fireworks":
+		return fireworks.NewClient(cfg), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", cfg.Name)
 	}

@@ -103,8 +103,8 @@ var settingsFields = []settingField{
 	{key: settingGeneralStrictValidation, group: "General", title: "Strict Booru Validation", description: "Filter booru output to retrieved tags only", kind: settingKindBool},
 	{key: settingGeneralTagWhitespace, group: "General", title: "Tag Whitespace", description: "Replace underscores with spaces in output", kind: settingKindBool},
 	{key: settingProviderEnabled, group: "Provider", title: "Enabled", description: "Enable online provider calls", kind: settingKindBool},
-	{key: settingProviderName, group: "Provider", title: "Name", description: "Active provider integration", kind: settingKindEnum, enumValues: []string{"openai", "openrouter", "nanogpt"}},
-	{key: settingProviderAPIBaseURL, group: "Provider", title: "API Base URL", description: "Override API endpoint", kind: settingKindString},
+	{key: settingProviderName, group: "Provider", title: "Name", description: "Active provider integration", kind: settingKindEnum, enumValues: []string{"openai", "openrouter", "nanogpt", "fireworks"}},
+	{key: settingProviderAPIBaseURL, group: "Provider", title: "API Base URL", description: "Override API endpoint (OpenAI only)", kind: settingKindString},
 	{key: settingProviderAPIKey, group: "Provider", title: "API Key", description: "Authentication token", kind: settingKindSecret},
 	{key: settingProviderModel, group: "Provider", title: "Model", description: "Model identifier used for calls", kind: settingKindString},
 	{key: settingProviderTemperature, group: "Provider", title: "Temperature", description: "Sampling creativity (0-2)", kind: settingKindFloat},
@@ -122,7 +122,11 @@ var settingsFields = []settingField{
 
 func buildSettingsItems(cfg config.Config) []list.Item {
 	items := make([]list.Item, 0, len(settingsFields))
+	provider := normalizeProviderName(cfg.Provider.Name)
 	for _, field := range settingsFields {
+		if field.key == settingProviderAPIBaseURL && provider != "openai" {
+			continue
+		}
 		items = append(items, settingItem{
 			field: field,
 			value: displaySettingValue(cfg, field.key),
@@ -225,6 +229,9 @@ func applySettingValue(cfg *config.Config, field settingField, raw string) error
 			cfg.Provider.APIBaseURL = defaultAPIBase(next)
 		}
 	case settingProviderAPIBaseURL:
+		if normalizeProviderName(cfg.Provider.Name) != "openai" {
+			return fmt.Errorf("base URL is fixed for %s", cfg.Provider.Name)
+		}
 		cfg.Provider.APIBaseURL = raw
 	case settingProviderAPIKey:
 		cfg.Provider.APIKey = raw
@@ -350,6 +357,8 @@ func normalizeProviderName(raw string) string {
 		return "openrouter"
 	case "nanogpt", "nano-gpt":
 		return "nanogpt"
+	case "fireworks":
+		return "fireworks"
 	default:
 		return strings.ToLower(strings.TrimSpace(raw))
 	}
@@ -361,6 +370,8 @@ func defaultAPIBase(provider string) string {
 		return "https://openrouter.ai/api/v1"
 	case "nanogpt":
 		return "https://nano-gpt.com/api/v1"
+	case "fireworks":
+		return "https://api.fireworks.ai/inference"
 	default:
 		return "https://api.openai.com/v1"
 	}

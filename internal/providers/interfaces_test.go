@@ -27,3 +27,14 @@ func TestBuildProviderSupportsNanoGPTHyphenAlias(t *testing.T) {
 		t.Fatalf("expected provider name nanogpt, got %s", provider.Name())
 	}
 }
+
+func TestBuildProviderSupportsFireworks(t *testing.T) {
+	cfg := config.ProviderConfig{Name: "fireworks"}
+	provider, err := BuildProvider(cfg)
+	if err != nil {
+		t.Fatalf("build provider failed: %v", err)
+	}
+	if provider.Name() != "fireworks" {
+		t.Fatalf("expected provider name fireworks, got %s", provider.Name())
+	}
+}
