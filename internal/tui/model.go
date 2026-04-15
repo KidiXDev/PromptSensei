@@ -50,6 +50,8 @@ var rebuildTips = []string{
 	"Tip: Character core tags improve automatic expansion quality.",
 }
 
+const enhanceStreamFlushInterval = time.Second
+
 type enhanceDoneMsg struct {
 	result   *domain.EnhanceResult
 	warnings []string
@@ -61,6 +63,7 @@ type enhanceStreamMsg struct {
 }
 
 type enhanceStreamClosedMsg struct{}
+type enhanceFlushTickMsg struct{}
 
 type datasetStatusDoneMsg struct {
 	status services.DatasetStatus
@@ -144,6 +147,8 @@ type model struct {
 	enhanceStreamCh   <-chan domain.EnhanceStreamEvent
 	liveOutput        string
 	liveReasoning     string
+	pendingOutput     string
+	pendingReasoning  string
 	tipIndex          int
 }
 
@@ -306,6 +311,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastErr = msg.err.Error()
 			m.notice = ""
 			m.screen = screenEditor
+			m.flushEnhancePending()
 			m.clearBusyState()
 			return m, nil
 		}
@@ -313,6 +319,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.warnings = msg.warnings
 		m.lastErr = ""
 		m.notice = "Prompt generated successfully."
+		m.flushEnhancePending()
 		m.clearBusyState()
 		m.resultView.SetContent(buildResultText(msg.result, msg.warnings, m.resultView.Width))
 		m.resultView.GotoTop()
@@ -323,14 +330,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.event.ReasoningDelta != "" {
-			m.liveReasoning += msg.event.ReasoningDelta
+			m.pendingReasoning += msg.event.ReasoningDelta
 		}
 		if msg.event.OutputDelta != "" {
-			m.liveOutput += msg.event.OutputDelta
+			m.pendingOutput += msg.event.OutputDelta
 		}
 		return m, waitEnhanceStreamCmd(m.enhanceStreamCh)
 	case enhanceStreamClosedMsg:
+		m.flushEnhancePending()
 		return m, nil
+	case enhanceFlushTickMsg:
+		if m.screen != screenBusy || m.busyMode != "enhance" {
+			return m, nil
+		}
+		m.flushEnhancePending()
+		return m, enhanceFlushTickCmd()
 	case datasetStatusDoneMsg:
 		if msg.err != nil {
 			m.lastErr = msg.err.Error()
@@ -1166,9 +1180,17 @@ func busyTooltipTickCmd() tea.Cmd {
 		return busyTooltipTickMsg{}
 	})
 }
+
+func enhanceFlushTickCmd() tea.Cmd {
+	return tea.Tick(enhanceStreamFlushInterval, func(_ time.Time) tea.Msg {
+		return enhanceFlushTickMsg{}
+	})
+}
+
 func (m model) renderBusy() string {
 	spin := m.spin.View()
 	label := highlightStyle.Render(m.busyLabel)
+	contentWidth := m.busyContentWidth()
 
 	lines := []string{
 		fmt.Sprintf("%s %s", spin, label),
@@ -1208,24 +1230,19 @@ func (m model) renderBusy() string {
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(primaryColor).
 			Padding(0, 1).
+			Width(contentWidth).
 			Margin(0, 0)
-		lines = append(lines, "", panelStyle.Render(warningStyle.Render("💡 ")+helpStyle.Render(m.busyTip)))
+		tip := wrapText(m.busyTip, max(16, contentWidth-4))
+		lines = append(lines, "", panelStyle.Render(warningStyle.Render("💡 ")+helpStyle.Render(tip)))
 	}
 
 	if m.busyMode == "enhance" {
+		maxLines := m.busySectionMaxLines()
 		if strings.TrimSpace(m.liveReasoning) != "" {
-			lines = append(lines,
-				"",
-				accentStyle.Render("Thinking"),
-				helpStyle.Render(previewTail(m.liveReasoning, 700)),
-			)
+			lines = append(lines, "", m.renderBusyStreamPanel("Thinking", m.liveReasoning, true, contentWidth, maxLines))
 		}
 		if strings.TrimSpace(m.liveOutput) != "" {
-			lines = append(lines,
-				"",
-				accentStyle.Render("Output"),
-				previewTail(m.liveOutput, 700),
-			)
+			lines = append(lines, "", m.renderBusyStreamPanel("Output", m.liveOutput, false, contentWidth, maxLines))
 		}
 	}
 
@@ -1281,6 +1298,8 @@ func (m *model) startBusy(mode string, label string) {
 	m.busyDetail = ""
 	m.liveOutput = ""
 	m.liveReasoning = ""
+	m.pendingOutput = ""
+	m.pendingReasoning = ""
 	if mode == "rebuild" {
 		m.tipIndex = 0
 		if len(rebuildTips) > 0 {
@@ -1303,6 +1322,8 @@ func (m *model) clearBusyState() {
 	m.busyElapsed = time.Time{}
 	m.rebuildProgressCh = nil
 	m.enhanceStreamCh = nil
+	m.pendingOutput = ""
+	m.pendingReasoning = ""
 }
 
 func (m *model) startEnhanceCmd(req domain.EnhanceRequest, label string) tea.Cmd {
@@ -1311,9 +1332,42 @@ func (m *model) startEnhanceCmd(req domain.EnhanceRequest, label string) tea.Cmd
 	m.startBusy("enhance", label)
 	return tea.Batch(
 		m.spin.Tick,
+		enhanceFlushTickCmd(),
 		waitEnhanceStreamCmd(streamCh),
 		enhanceCmd(m.ctx, m.promptService, req, streamCh),
 	)
+}
+
+func (m *model) flushEnhancePending() {
+	if m.pendingReasoning != "" {
+		m.liveReasoning += m.pendingReasoning
+		m.pendingReasoning = ""
+	}
+	if m.pendingOutput != "" {
+		m.liveOutput += m.pendingOutput
+		m.pendingOutput = ""
+	}
+}
+
+func (m model) renderBusyStreamPanel(title, content string, subtle bool, width int, maxLines int) string {
+	base := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(primaryColor).
+		Padding(0, 1).
+		Width(width)
+	if subtle {
+		base = base.BorderForeground(inactiveColor)
+	}
+	innerWidth := max(16, width-4)
+	content = previewTail(content, 4000)
+	content = wrapText(content, innerWidth)
+	content = tailLines(content, maxLines)
+	header := accentStyle.Render(title)
+	body := content
+	if subtle {
+		body = helpStyle.Render(content)
+	}
+	return base.Render(lipgloss.JoinVertical(lipgloss.Left, header, body))
 }
 
 func (m *model) startRebuildCmd(origin string, label string) tea.Cmd {
@@ -1335,6 +1389,82 @@ func previewTail(input string, maxChars int) string {
 		return input
 	}
 	return "..." + input[len(input)-maxChars:]
+}
+
+func (m model) busyContentWidth() int {
+	if m.width <= 0 {
+		return 66
+	}
+	// Account for outer container borders/padding and side margins.
+	return max(24, m.width-14)
+}
+
+func (m model) busySectionMaxLines() int {
+	if m.height <= 0 {
+		return 10
+	}
+	return max(4, (m.height-22)/2)
+}
+
+func tailLines(content string, maxLines int) string {
+	if maxLines <= 0 {
+		return content
+	}
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	if len(lines) <= maxLines {
+		return strings.Join(lines, "\n")
+	}
+	return "...\n" + strings.Join(lines[len(lines)-maxLines:], "\n")
+}
+
+func wrapText(content string, width int) string {
+	if width <= 0 {
+		return content
+	}
+	rawLines := strings.Split(content, "\n")
+	out := make([]string, 0, len(rawLines))
+	for _, line := range rawLines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			out = append(out, "")
+			continue
+		}
+		words := strings.Fields(line)
+		if len(words) == 0 {
+			out = append(out, "")
+			continue
+		}
+
+		current := words[0]
+		for _, word := range words[1:] {
+			next := current + " " + word
+			if lipgloss.Width(next) <= width {
+				current = next
+				continue
+			}
+			out = append(out, hardWrapWord(current, width)...)
+			current = word
+		}
+		out = append(out, hardWrapWord(current, width)...)
+	}
+	return strings.Join(out, "\n")
+}
+
+func hardWrapWord(text string, width int) []string {
+	if width <= 0 || lipgloss.Width(text) <= width {
+		return []string{text}
+	}
+	runes := []rune(text)
+	chunks := make([]string, 0, len(runes)/width+1)
+	for len(runes) > 0 {
+		n := width
+		if len(runes) < n {
+			n = len(runes)
+		}
+		chunks = append(chunks, string(runes[:n]))
+		runes = runes[n:]
+	}
+	return chunks
 }
 
 func (m *model) refreshSettingsList() {
