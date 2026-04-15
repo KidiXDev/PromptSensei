@@ -737,11 +737,11 @@ func (m *model) resizeComponents() {
 	m.homeList.SetSize(homeWidth, listHeight)
 	m.knowledgeList.SetSize(listWidth, listHeight)
 	m.settingsList.SetSize(listWidth, listHeight)
-	
+
 	totalEditorHeight := max(12, m.height-20)
 	promptHeight := int(float64(totalEditorHeight) * 0.7)
 	contextHeight := totalEditorHeight - promptHeight
-	
+
 	m.editor.SetWidth(max(40, m.width-14))
 	m.editor.SetHeight(max(6, promptHeight))
 	m.contextEditor.SetWidth(max(40, m.width-14))
@@ -790,12 +790,12 @@ func (m model) renderHome() string {
 
 func (m model) renderEditor() string {
 	header := highlightStyle.Render("✍ PROMPT CRAFTING")
-	
+
 	modeType := ternary(m.createMode, noticeStyle.Render("CREATE"), accentStyle.Render("ENHANCE"))
-	
-	info := fmt.Sprintf("Task: %s  |  Mode: %s  |  Strict: %s", 
-		modeType, 
-		accentStyle.Render(string(m.mode)), 
+
+	info := fmt.Sprintf("Task: %s  |  Mode: %s  |  Strict: %s",
+		modeType,
+		accentStyle.Render(string(m.mode)),
 		ternary(m.strict, noticeStyle.Render("ON"), helpStyle.Render("OFF")))
 
 	knowledge := "None"
@@ -857,7 +857,7 @@ func (m model) renderKnowledge() string {
 
 func (m model) renderDataset() string {
 	header := highlightStyle.Render("📊 DATASET EXPLORER")
-	
+
 	lines := []string{
 		header,
 		"",
@@ -890,9 +890,9 @@ func (m model) renderSettings() string {
 	if item, ok := m.selectedSettingItem(); ok {
 		selectedDesc = item.field.description
 	}
-	
+
 	header := highlightStyle.Render("⚙ CONFIGURATION")
-	
+
 	statusLine := fmt.Sprintf("Path: %s", helpStyle.Render(m.configPath))
 	if m.settingsDirty {
 		statusLine += " " + warningStyle.Render("[UNSAVED CHANGES]")
@@ -926,7 +926,7 @@ func (m model) renderResult() string {
 	}
 
 	header := highlightStyle.Render("✨ GENERATED PROMPT")
-	
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		"",
@@ -982,7 +982,7 @@ func buildResultText(result *domain.EnhanceResult, warnings []string, width int)
 
 func buildDatasetText(status services.DatasetStatus) string {
 	header := highlightStyle.Render("DATASET SNAPSHOT")
-	
+
 	lines := []string{
 		header,
 		fmt.Sprintf("Paths: %s, %s", helpStyle.Render(status.Paths.TagCSV), helpStyle.Render(status.Paths.CharacterCSV)),
@@ -994,11 +994,11 @@ func buildDatasetText(status services.DatasetStatus) string {
 		fmt.Sprintf("  Characters:     %d", status.Counts.Characters),
 		fmt.Sprintf("  Core Tags:      %d", status.Counts.CharacterCoreTags),
 	}
-	
+
 	if status.RebuildNeeded {
 		lines = append(lines, "", warningStyle.Render("! REBUILD RECOMMENDED"), "Reasons: "+strings.Join(status.RebuildReasons, ", "))
 	}
-	
+
 	return strings.Join(lines, "\n")
 }
 
@@ -1176,7 +1176,7 @@ func busyTooltipTickCmd() tea.Cmd {
 func (m model) renderBusy() string {
 	spin := m.spin.View()
 	label := highlightStyle.Render(m.busyLabel)
-	
+
 	lines := []string{
 		fmt.Sprintf("%s %s", spin, label),
 		"",
@@ -1186,7 +1186,7 @@ func (m model) renderBusy() string {
 	if stage != "" {
 		lines = append(lines, "Stage:  "+accentStyle.Render(stage))
 	}
-	
+
 	if m.busyTotal > 0 {
 		percent := float64(m.busyCurrent) / float64(m.busyTotal)
 		width := max(20, m.width-20)
@@ -1194,11 +1194,11 @@ func (m model) renderBusy() string {
 		if filled > width {
 			filled = width
 		}
-		
-		bar := selectedCheckboxStyle.Render(strings.Repeat("█", filled)) + 
-		       helpStyle.Render(strings.Repeat("░", width-filled))
-		
-		lines = append(lines, 
+
+		bar := selectedCheckboxStyle.Render(strings.Repeat("█", filled)) +
+			helpStyle.Render(strings.Repeat("░", width-filled))
+
+		lines = append(lines,
 			fmt.Sprintf("Progress: %d / %d", m.busyCurrent, m.busyTotal),
 			bar,
 		)
@@ -1209,11 +1209,11 @@ func (m model) renderBusy() string {
 	if !m.busyElapsed.IsZero() {
 		lines = append(lines, "", fmt.Sprintf("Time: %s", highlightStyle.Render(time.Since(m.busyElapsed).Round(100*time.Millisecond).String())))
 	}
-	
+
 	if m.busyMode == "rebuild" && m.busyTip != "" {
-		lines = append(lines, "", panelStyle.BorderForeground(warningColor).Render(warningStyle.Render("💡 ") + helpStyle.Render(m.busyTip)))
+		lines = append(lines, "", panelStyle.BorderForeground(warningColor).Render(warningStyle.Render("💡 ")+helpStyle.Render(m.busyTip)))
 	}
-	
+
 	return strings.Join(lines, "\n")
 }
 
