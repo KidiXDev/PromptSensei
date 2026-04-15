@@ -117,11 +117,6 @@ var settingsFields = []settingField{
 	{key: settingUIShowDebugPanel, group: "UI", title: "Show Debug Panel", description: "Display debug details in UI views", kind: settingKindBool},
 	{key: settingUIShowRetrievalCandidates, group: "UI", title: "Show Retrieval Candidates", description: "Display retrieval candidate blocks", kind: settingKindBool},
 	{key: settingDatasetAutoRebuild, group: "Dataset", title: "Auto Rebuild on CSV Change", description: "Rebuild cache automatically when CSV changes", kind: settingKindBool},
-	{key: settingDatasetTagCSVPath, group: "Dataset", title: "Tag CSV Path", description: "Path to tag.csv", kind: settingKindString},
-	{key: settingDatasetCharacterCSVPath, group: "Dataset", title: "Character CSV Path", description: "Path to danbooru_character.csv", kind: settingKindString},
-	{key: settingDatasetCachePath, group: "Dataset", title: "Cache DB Path", description: "Path to generated sqlite cache", kind: settingKindString},
-	{key: settingDatasetMetadataPath, group: "Dataset", title: "Metadata Path", description: "Path to dataset metadata JSON", kind: settingKindString},
-	{key: settingDatasetSchemaVersion, group: "Dataset", title: "Schema Version", description: "Dataset schema version integer", kind: settingKindInt},
 	{key: settingActionDatasetStatus, group: "Dataset", title: "View Dataset Status", description: "Inspect CSV/SQLite cache health and statistics", kind: settingKindAction},
 }
 

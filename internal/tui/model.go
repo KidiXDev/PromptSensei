@@ -680,7 +680,7 @@ func (m model) updateBusy(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	header := titleStyle.Render("PromptSensei")
+	header := titleStyle.Render(domain.AppName)
 	subtitle := subtitleStyle.Render("AI prompt crafting with local booru-aware retrieval")
 
 	body := ""
@@ -843,11 +843,8 @@ func (m model) renderSettings() string {
 
 	header := highlightStyle.Render("⚙ CONFIGURATION")
 
-	statusLine := fmt.Sprintf("Path: %s", helpStyle.Render(m.configPath))
-
 	lines := []string{
 		header,
-		statusLine,
 		"",
 		m.settingsList.View(),
 		"",
@@ -927,14 +924,8 @@ func buildResultText(result *domain.EnhanceResult, warnings []string, width int)
 }
 
 func buildDatasetText(status services.DatasetStatus) string {
-	header := highlightStyle.Render("DATASET SNAPSHOT")
-
 	lines := []string{
-		header,
-		fmt.Sprintf("Paths: %s, %s", helpStyle.Render(status.Paths.TagCSV), helpStyle.Render(status.Paths.CharacterCSV)),
-		fmt.Sprintf("Cache: %s", helpStyle.Render(status.Paths.DBPath)),
-		"",
-		accentStyle.Render("STATISTICS"),
+		accentStyle.Render("DATASET STATISTICS"),
 		fmt.Sprintf("  Tags:           %d", status.Counts.Tags),
 		fmt.Sprintf("  Aliases:        %d", status.Counts.TagAliases),
 		fmt.Sprintf("  Characters:     %d", status.Counts.Characters),
@@ -1170,7 +1161,7 @@ func (m model) renderBusy() string {
 
 func (m model) renderFooter() string {
 	left := helpStyle.Render(time.Now().Format("2006-01-02 15:04:05"))
-	right := helpStyle.Render("PromptSensei v1.3.1")
+	right := helpStyle.Render(fmt.Sprintf("%s %s", domain.AppName, domain.AppVersion))
 
 	msg := ""
 	if m.notice != "" {
