@@ -99,3 +99,31 @@ func (s *ProviderService) Generate(ctx context.Context, req domain.GenerateReque
 	)
 	return resp, nil
 }
+
+func (s *ProviderService) GenerateStream(ctx context.Context, req domain.GenerateRequest, onEvent domain.GenerateStreamCallback) (*domain.GenerateResponse, error) {
+	s.mu.RLock()
+	enabled := s.cfg.Enabled && s.provider != nil
+	p := s.provider
+	s.mu.RUnlock()
+	if !enabled {
+		logging.Debug("provider stream call skipped; provider disabled")
+		return nil, nil
+	}
+	logging.Debug("provider stream generate start", "provider", p.Name(), "model", req.Model, "temperature", req.Temperature, "max_tokens", req.MaxTokens)
+	resp, err := p.GenerateStream(ctx, req, onEvent)
+	if err != nil {
+		logging.Error("provider stream generate failed", "provider", p.Name(), "error", err)
+		return nil, err
+	}
+	if resp == nil {
+		logging.Warn("provider stream returned nil response", "provider", p.Name())
+		return nil, nil
+	}
+	logging.Debug("provider stream generate complete",
+		"provider", resp.Provider,
+		"prompt_tokens", resp.Usage.PromptTokens,
+		"completion_tokens", resp.Usage.CompletionTokens,
+		"total_tokens", resp.Usage.TotalTokens,
+	)
+	return resp, nil
+}

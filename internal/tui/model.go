@@ -56,6 +56,12 @@ type enhanceDoneMsg struct {
 	err      error
 }
 
+type enhanceStreamMsg struct {
+	event domain.EnhanceStreamEvent
+}
+
+type enhanceStreamClosedMsg struct{}
+
 type datasetStatusDoneMsg struct {
 	status services.DatasetStatus
 	err    error
@@ -135,6 +141,9 @@ type model struct {
 
 	selectedKnowledge map[string]struct{}
 	rebuildProgressCh <-chan services.DatasetRebuildProgress
+	enhanceStreamCh   <-chan domain.EnhanceStreamEvent
+	liveOutput        string
+	liveReasoning     string
 	tipIndex          int
 }
 
@@ -309,6 +318,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resultView.GotoTop()
 		m.screen = screenResult
 		return m, nil
+	case enhanceStreamMsg:
+		if m.busyMode != "enhance" {
+			return m, nil
+		}
+		if msg.event.ReasoningDelta != "" {
+			m.liveReasoning += msg.event.ReasoningDelta
+		}
+		if msg.event.OutputDelta != "" {
+			m.liveOutput += msg.event.OutputDelta
+		}
+		return m, waitEnhanceStreamCmd(m.enhanceStreamCh)
+	case enhanceStreamClosedMsg:
+		return m, nil
 	case datasetStatusDoneMsg:
 		if msg.err != nil {
 			m.lastErr = msg.err.Error()
@@ -477,9 +499,8 @@ func (m model) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 				CreateMode:     m.createMode,
 			}
 			m.lastRequest = req
-			m.startBusy("enhance", "Generating prompt")
 			m.lastErr = ""
-			return m, tea.Batch(m.spin.Tick, enhanceCmd(m.ctx, m.promptService, *req))
+			return m, m.startEnhanceCmd(*req, "Generating prompt")
 		case "ctrl+g":
 			m.mode = nextMode(m.mode)
 			return m, nil
@@ -655,8 +676,7 @@ func (m model) updateResult(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.lastRequest == nil {
 				return m, nil
 			}
-			m.startBusy("enhance", "Regenerating prompt")
-			return m, tea.Batch(m.spin.Tick, enhanceCmd(m.ctx, m.promptService, *m.lastRequest))
+			return m, m.startEnhanceCmd(*m.lastRequest, "Regenerating prompt")
 		case "c":
 			if m.lastResult == nil {
 				return m, nil
@@ -917,9 +937,19 @@ func buildResultText(result *domain.EnhanceResult, warnings []string, width int)
 
 	techPanel := techInfoStyle.Render(strings.Join(techLines, "\n"))
 
+	reasoningPanel := ""
+	if strings.TrimSpace(result.Reasoning) != "" {
+		reasoningPanel = techInfoStyle.Render(strings.Join([]string{
+			"",
+			accentStyle.Render("THINKING"),
+			strings.TrimSpace(result.Reasoning),
+		}, "\n"))
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		promptContent,
 		techPanel,
+		reasoningPanel,
 	)
 }
 
@@ -1032,14 +1062,40 @@ func nextMode(current domain.Mode) domain.Mode {
 	}
 }
 
-func enhanceCmd(ctx context.Context, service *services.PromptService, req domain.EnhanceRequest) tea.Cmd {
+func enhanceCmd(ctx context.Context, service *services.PromptService, req domain.EnhanceRequest, streamCh chan<- domain.EnhanceStreamEvent) tea.Cmd {
 	return func() tea.Msg {
-		result, warnings, err := service.Enhance(ctx, req)
+		if streamCh != nil {
+			defer close(streamCh)
+		}
+		result, warnings, err := service.EnhanceStream(ctx, req, func(event domain.EnhanceStreamEvent) error {
+			if streamCh == nil {
+				return nil
+			}
+			select {
+			case streamCh <- event:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
 		return enhanceDoneMsg{
 			result:   result,
 			warnings: warnings,
 			err:      err,
 		}
+	}
+}
+
+func waitEnhanceStreamCmd(streamCh <-chan domain.EnhanceStreamEvent) tea.Cmd {
+	return func() tea.Msg {
+		if streamCh == nil {
+			return enhanceStreamClosedMsg{}
+		}
+		event, ok := <-streamCh
+		if !ok {
+			return enhanceStreamClosedMsg{}
+		}
+		return enhanceStreamMsg{event: event}
 	}
 }
 
@@ -1156,6 +1212,23 @@ func (m model) renderBusy() string {
 		lines = append(lines, "", panelStyle.Render(warningStyle.Render("💡 ")+helpStyle.Render(m.busyTip)))
 	}
 
+	if m.busyMode == "enhance" {
+		if strings.TrimSpace(m.liveReasoning) != "" {
+			lines = append(lines,
+				"",
+				accentStyle.Render("Thinking"),
+				helpStyle.Render(previewTail(m.liveReasoning, 700)),
+			)
+		}
+		if strings.TrimSpace(m.liveOutput) != "" {
+			lines = append(lines,
+				"",
+				accentStyle.Render("Output"),
+				previewTail(m.liveOutput, 700),
+			)
+		}
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -1206,6 +1279,8 @@ func (m *model) startBusy(mode string, label string) {
 	m.busyCurrent = 0
 	m.busyTotal = 0
 	m.busyDetail = ""
+	m.liveOutput = ""
+	m.liveReasoning = ""
 	if mode == "rebuild" {
 		m.tipIndex = 0
 		if len(rebuildTips) > 0 {
@@ -1227,6 +1302,18 @@ func (m *model) clearBusyState() {
 	m.busyTip = ""
 	m.busyElapsed = time.Time{}
 	m.rebuildProgressCh = nil
+	m.enhanceStreamCh = nil
+}
+
+func (m *model) startEnhanceCmd(req domain.EnhanceRequest, label string) tea.Cmd {
+	streamCh := make(chan domain.EnhanceStreamEvent, 64)
+	m.enhanceStreamCh = streamCh
+	m.startBusy("enhance", label)
+	return tea.Batch(
+		m.spin.Tick,
+		waitEnhanceStreamCmd(streamCh),
+		enhanceCmd(m.ctx, m.promptService, req, streamCh),
+	)
 }
 
 func (m *model) startRebuildCmd(origin string, label string) tea.Cmd {
@@ -1240,6 +1327,14 @@ func (m *model) startRebuildCmd(origin string, label string) tea.Cmd {
 		waitRebuildProgressCmd(progressCh),
 		datasetRebuildCmd(m.ctx, m.datasetService, progressCh),
 	)
+}
+
+func previewTail(input string, maxChars int) string {
+	input = strings.TrimSpace(input)
+	if len(input) <= maxChars {
+		return input
+	}
+	return "..." + input[len(input)-maxChars:]
 }
 
 func (m *model) refreshSettingsList() {

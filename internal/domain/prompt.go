@@ -37,6 +37,7 @@ type EnhanceRequest struct {
 
 type EnhanceResult struct {
 	Output            string
+	Reasoning         string
 	Retrieval         RetrievalResult
 	SystemPrompt      string
 	UserPrompt        string
@@ -45,4 +46,9 @@ type EnhanceResult struct {
 	ValidationApplied bool
 	ChainApplied      bool
 	ChainStages       int
+}
+
+type EnhanceStreamEvent struct {
+	OutputDelta    string
+	ReasoningDelta string
 }

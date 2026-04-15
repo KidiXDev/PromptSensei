@@ -17,12 +17,21 @@ type Usage struct {
 }
 
 type GenerateResponse struct {
-	Text     string
-	Usage    Usage
-	Provider string
+	Text      string
+	Reasoning string
+	Usage     Usage
+	Provider  string
 }
+
+type GenerateStreamEvent struct {
+	TextDelta      string
+	ReasoningDelta string
+}
+
+type GenerateStreamCallback func(event GenerateStreamEvent) error
 
 type Provider interface {
 	Name() string
 	Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error)
+	GenerateStream(ctx context.Context, req GenerateRequest, onEvent GenerateStreamCallback) (*GenerateResponse, error)
 }

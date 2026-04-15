@@ -52,6 +52,22 @@ func (s *PromptService) configSnapshot() config.Config {
 }
 
 func (s *PromptService) Enhance(ctx context.Context, req domain.EnhanceRequest) (*domain.EnhanceResult, []string, error) {
+	return s.enhance(ctx, req, nil)
+}
+
+func (s *PromptService) EnhanceStream(
+	ctx context.Context,
+	req domain.EnhanceRequest,
+	onEvent func(domain.EnhanceStreamEvent) error,
+) (*domain.EnhanceResult, []string, error) {
+	return s.enhance(ctx, req, onEvent)
+}
+
+func (s *PromptService) enhance(
+	ctx context.Context,
+	req domain.EnhanceRequest,
+	onEvent func(domain.EnhanceStreamEvent) error,
+) (*domain.EnhanceResult, []string, error) {
 	cfg := s.configSnapshot()
 
 	mode := req.Mode
@@ -106,17 +122,26 @@ func (s *PromptService) Enhance(ctx context.Context, req domain.EnhanceRequest) 
 	})
 
 	finalOutput := deterministicFallback(mode, req.Prompt, retrieval)
+	finalReasoning := ""
 	usedProvider := false
 	providerName := s.providers.Name()
 
 	if s.providers.Enabled() {
 		logPromptSequenceRequest(cfg.Provider.Model, cfg.Provider.Temperature, cfg.Provider.MaxTokens, assembled.SystemPrompt, assembled.UserPrompts)
-		resp, err := s.providers.Generate(ctx, domain.GenerateRequest{
+		resp, err := s.providers.GenerateStream(ctx, domain.GenerateRequest{
 			SystemPrompt: assembled.SystemPrompt,
 			UserPrompts:  assembled.UserPrompts,
 			Model:        cfg.Provider.Model,
 			Temperature:  cfg.Provider.Temperature,
 			MaxTokens:    cfg.Provider.MaxTokens,
+		}, func(event domain.GenerateStreamEvent) error {
+			if onEvent == nil {
+				return nil
+			}
+			return onEvent(domain.EnhanceStreamEvent{
+				OutputDelta:    event.TextDelta,
+				ReasoningDelta: event.ReasoningDelta,
+			})
 		})
 		if err != nil {
 			logging.Error("provider generation failed", "error", err)
@@ -124,6 +149,7 @@ func (s *PromptService) Enhance(ctx context.Context, req domain.EnhanceRequest) 
 		}
 		if resp != nil && strings.TrimSpace(resp.Text) != "" {
 			finalOutput = strings.TrimSpace(resp.Text)
+			finalReasoning = strings.TrimSpace(resp.Reasoning)
 			usedProvider = true
 			providerName = resp.Provider
 			logging.Debug("provider output", "provider", providerName, "output", finalOutput)
@@ -141,7 +167,7 @@ func (s *PromptService) Enhance(ctx context.Context, req domain.EnhanceRequest) 
 		validationApplied = true
 		logging.Debug("strict booru validation applied")
 	}
-	
+
 	if cfg.General.TagWhitespace {
 		finalOutput = strings.ReplaceAll(finalOutput, "_", " ")
 		logging.Debug("tag whitespace replacement applied")
@@ -163,6 +189,7 @@ func (s *PromptService) Enhance(ctx context.Context, req domain.EnhanceRequest) 
 
 	return &domain.EnhanceResult{
 		Output:            finalOutput,
+		Reasoning:         finalReasoning,
 		Retrieval:         retrieval,
 		SystemPrompt:      assembled.SystemPrompt,
 		UserPrompt:        primaryUserPrompt,

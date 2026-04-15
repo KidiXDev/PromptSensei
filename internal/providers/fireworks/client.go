@@ -120,6 +120,19 @@ func (c *Client) Generate(ctx context.Context, req domain.GenerateRequest) (*dom
 	}, nil
 }
 
+func (c *Client) GenerateStream(ctx context.Context, req domain.GenerateRequest, onEvent domain.GenerateStreamCallback) (*domain.GenerateResponse, error) {
+	resp, err := c.Generate(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if onEvent != nil && resp != nil && strings.TrimSpace(resp.Text) != "" {
+		if err := onEvent(domain.GenerateStreamEvent{TextDelta: resp.Text}); err != nil {
+			return nil, err
+		}
+	}
+	return resp, nil
+}
+
 type chatCompletionResponse struct {
 	Choices []struct {
 		Message struct {
