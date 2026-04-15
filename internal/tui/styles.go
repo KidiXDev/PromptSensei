@@ -27,8 +27,8 @@ var (
 	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(primaryColor).
-			Padding(1, 2).
-			Margin(0, 1)
+			Padding(1, 1).
+			Margin(0, 0)
 
 	accentStyle = lipgloss.NewStyle().
 			Foreground(primaryColor).

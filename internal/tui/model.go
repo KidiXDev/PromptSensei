@@ -40,7 +40,6 @@ const (
 	actionDatasetStatus = "dataset_status"
 	actionKnowledge     = "knowledge"
 	actionSettings      = "settings"
-	actionRebuild       = "rebuild_dataset"
 	actionExit          = "exit"
 )
 
@@ -73,6 +72,8 @@ type datasetRebuildProgressMsg struct {
 type rebuildProgressClosedMsg struct{}
 
 type busyTooltipTickMsg struct{}
+
+type clockTickMsg struct{}
 
 type startupRebuildCheckDoneMsg struct {
 	needed  bool
@@ -129,7 +130,6 @@ type model struct {
 	lastRequest   *domain.EnhanceRequest
 	lastResult    *domain.EnhanceResult
 	warnings      []string
-	settingsDirty bool
 	settingsEdit  bool
 	settingsError string
 
@@ -171,17 +171,15 @@ func newModel(
 	knowledgeFiles []string,
 ) model {
 	homeItems := []list.Item{
-		homeItem{title: "Create Prompt", description: "Generate from a rough idea", action: actionCreate},
-		homeItem{title: "Enhance Prompt", description: "Improve an existing prompt", action: actionEnhance},
-		homeItem{title: "Dataset Status", description: "Inspect CSV/SQLite cache health", action: actionDatasetStatus},
-		homeItem{title: "Knowledge Files", description: "Manage selected knowledge docs", action: actionKnowledge},
-		homeItem{title: "Settings", description: "Edit provider, API key, mode, and paths", action: actionSettings},
-		homeItem{title: "Rebuild Dataset", description: "Force CSV to SQLite rebuild", action: actionRebuild},
+		homeItem{title: "Create Prompt", description: "Start from a fresh idea", action: actionCreate},
+		homeItem{title: "Enhance Prompt", description: "Refine an existing prompt", action: actionEnhance},
+		homeItem{title: "Settings", description: "Configure context, provider and database", action: actionSettings},
 		homeItem{title: "Exit", description: "Quit PromptSensei", action: actionExit},
 	}
 
 	home := list.New(homeItems, list.NewDefaultDelegate(), 60, 14)
-	home.Title = "Actions"
+	home.SetShowTitle(false)
+	home.SetShowStatusBar(false)
 	home.SetShowHelp(false)
 	home.SetFilteringEnabled(false)
 
@@ -244,9 +242,16 @@ func newModel(
 	}
 }
 
+func clockTickCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(_ time.Time) tea.Msg {
+		return clockTickMsg{}
+	})
+}
+
 func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spin.Tick,
+		clockTickCmd(),
 		startupRebuildCheckCmd(m.ctx, m.datasetService),
 	)
 }
@@ -265,6 +270,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case clockTickMsg:
+		return m, clockTickCmd()
 	case startupRebuildCheckDoneMsg:
 		if msg.err != nil {
 			m.lastErr = msg.err.Error()
@@ -280,7 +287,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.needed && !msg.auto {
 			m.notice = "Dataset cache is stale (" + joinReasons(msg.reasons) + "). Auto rebuild disabled."
 		} else {
-			m.notice = "Dataset cache is ready."
+			m.notice = ""
 		}
 		m.screen = screenHome
 		m.clearBusyState()
@@ -362,9 +369,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cfg = m.settingsDraft
 		m.mode = m.cfg.General.DefaultMode
 		m.strict = m.cfg.General.StrictBooruValidation
-		m.notice = "Settings saved and applied."
+		m.notice = ""
 		m.lastErr = ""
-		m.settingsDirty = false
 		m.refreshSettingsList()
 		return m, nil
 	}
@@ -417,24 +423,13 @@ func (m model) updateHome(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editor.Focus()
 				m.screen = screenEditor
 				return m, nil
-			case actionDatasetStatus:
-				m.startBusy("status", "Loading dataset status")
-				return m, tea.Batch(m.spin.Tick, datasetStatusCmd(m.ctx, m.datasetService))
-			case actionKnowledge:
-				m.knowledgeReturn = screenHome
-				m.syncKnowledgeListSelection()
-				m.screen = screenKnowledge
-				return m, nil
 			case actionSettings:
 				m.settingsDraft = m.cfg
-				m.settingsDirty = false
 				m.settingsEdit = false
 				m.settingsError = ""
 				m.refreshSettingsList()
 				m.screen = screenSettings
 				return m, nil
-			case actionRebuild:
-				return m, m.startRebuildCmd("manual", "Rebuilding SQLite cache from CSV")
 			case actionExit:
 				return m, tea.Quit
 			}
@@ -610,18 +605,15 @@ func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.settingsDraft = next
-				m.settingsDirty = m.settingsDraft != m.cfg
 				m.settingsEdit = false
 				m.settingsError = ""
 				m.refreshSettingsList()
-				return m, nil
+				return m, saveSettingsCmd(m.saveConfig, m.settingsDraft)
 			}
 		}
 		return m, cmd
 	}
 
-	var cmd tea.Cmd
-	m.settingsList, cmd = m.settingsList.Update(msg)
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "esc":
@@ -629,34 +621,21 @@ func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+r":
 			m.settingsDraft = m.cfg
-			m.settingsDirty = false
 			m.settingsError = ""
 			m.refreshSettingsList()
 			m.notice = "Discarded unsaved settings changes."
 			return m, nil
-		case "ctrl+s":
-			if !m.settingsDirty {
-				m.notice = "No settings changes to save."
-				return m, nil
-			}
-			if m.saveConfig == nil {
-				m.cfg = m.settingsDraft
-				m.mode = m.cfg.General.DefaultMode
-				m.strict = m.cfg.General.StrictBooruValidation
-				m.settingsDirty = false
-				m.refreshSettingsList()
-				m.notice = "Settings updated in session."
-				return m, nil
-			}
-			return m, saveSettingsCmd(m.saveConfig, m.settingsDraft)
 		case "enter":
-			return m.activateOrEditSetting(1)
+			return m.activateOrEditSetting(0)
 		case "right", "l", " ":
 			return m.activateOrEditSetting(1)
 		case "left", "h":
 			return m.activateOrEditSetting(-1)
 		}
 	}
+
+	var cmd tea.Cmd
+	m.settingsList, cmd = m.settingsList.Update(msg)
 	return m, cmd
 }
 
@@ -705,21 +684,22 @@ func (m model) View() string {
 	subtitle := subtitleStyle.Render("AI prompt crafting with local booru-aware retrieval")
 
 	body := ""
+	panelW := max(40, m.width-2)
 	switch m.screen {
 	case screenHome:
-		body = panelStyle.Render(m.renderHome())
+		body = panelStyle.Width(panelW).Render(m.renderHome())
 	case screenEditor:
-		body = panelStyle.Render(m.renderEditor())
+		body = panelStyle.Width(panelW).Render(m.renderEditor())
 	case screenKnowledge:
-		body = panelStyle.Render(m.renderKnowledge())
+		body = panelStyle.Width(panelW).Render(m.renderKnowledge())
 	case screenDataset:
-		body = panelStyle.Render(m.renderDataset())
+		body = panelStyle.Width(panelW).Render(m.renderDataset())
 	case screenSettings:
-		body = panelStyle.Render(m.renderSettings())
+		body = panelStyle.Width(panelW).Render(m.renderSettings())
 	case screenResult:
-		body = panelStyle.Render(m.renderResult())
+		body = panelStyle.Width(panelW).Render(m.renderResult())
 	case screenBusy:
-		body = panelStyle.Render(m.renderBusy())
+		body = panelStyle.Width(panelW).Render(m.renderBusy())
 	}
 
 	footer := m.renderFooter()
@@ -731,10 +711,9 @@ func (m *model) resizeComponents() {
 		return
 	}
 
-	listWidth := max(45, m.width-8)
-	homeWidth := max(34, int(float64(listWidth)*0.6))
+	listWidth := max(40, m.width-4)
 	listHeight := max(10, m.height-14)
-	m.homeList.SetSize(homeWidth, listHeight)
+	m.homeList.SetSize(listWidth, listHeight)
 	m.knowledgeList.SetSize(listWidth, listHeight)
 	m.settingsList.SetSize(listWidth, listHeight)
 
@@ -756,36 +735,7 @@ func (m *model) resizeComponents() {
 }
 
 func (m model) renderHome() string {
-
-	// Info section
-	infoLines := []string{
-		accentStyle.Render("SESSION CONTEXT"),
-		fmt.Sprintf("  Mode:     %s", highlightStyle.Render(string(m.mode))),
-		fmt.Sprintf("  Task:     %s", ternary(m.createMode, noticeStyle.Render("Create"), accentStyle.Render("Enhance"))),
-		fmt.Sprintf("  Strict:   %s", ternary(m.strict, noticeStyle.Render("Enabled"), helpStyle.Render("Disabled"))),
-		"",
-		accentStyle.Render("ACTIVE PROVIDER"),
-		fmt.Sprintf("  Name:     %s", m.cfg.Provider.Name),
-		fmt.Sprintf("  Model:    %s", m.cfg.Provider.Model),
-		"",
-		accentStyle.Render("KNOWLEDGE"),
-		fmt.Sprintf("  Selected: %d files", len(m.selectedKnowledge)),
-	}
-
-	left := m.homeList.View()
-	// Calculate right width based on actual component sizes
-	rightWidth := max(30, m.width-m.homeList.Width()-10)
-	right := lipgloss.NewStyle().
-		MarginLeft(4).
-		Padding(1, 2).
-		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(lipgloss.Color("238")).
-		Width(rightWidth).
-		Render(strings.Join(infoLines, "\n"))
-
-	content := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-
-	return content
+	return m.homeList.View()
 }
 
 func (m model) renderEditor() string {
@@ -894,9 +844,6 @@ func (m model) renderSettings() string {
 	header := highlightStyle.Render("⚙ CONFIGURATION")
 
 	statusLine := fmt.Sprintf("Path: %s", helpStyle.Render(m.configPath))
-	if m.settingsDirty {
-		statusLine += " " + warningStyle.Render("[UNSAVED CHANGES]")
-	}
 
 	lines := []string{
 		header,
@@ -908,10 +855,9 @@ func (m model) renderSettings() string {
 		"",
 		helpStyle.Render(
 			fmt.Sprintf(
-				"%s edit/toggle  %s cycles  %s save  %s reset  %s back",
+				"%s edit/toggle  %s cycles  %s reset  %s back",
 				keyStyle.Render("enter/space"),
 				keyStyle.Render("←/→"),
-				keyStyle.Render("ctrl+s"),
 				keyStyle.Render("ctrl+r"),
 				keyStyle.Render("esc"),
 			),
@@ -1211,26 +1157,53 @@ func (m model) renderBusy() string {
 	}
 
 	if m.busyMode == "rebuild" && m.busyTip != "" {
-		lines = append(lines, "", panelStyle.BorderForeground(warningColor).Render(warningStyle.Render("💡 ")+helpStyle.Render(m.busyTip)))
+		panelStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(primaryColor).
+			Padding(0, 1).
+			Margin(0, 0)
+		lines = append(lines, "", panelStyle.Render(warningStyle.Render("💡 ")+helpStyle.Render(m.busyTip)))
 	}
 
 	return strings.Join(lines, "\n")
 }
 
 func (m model) renderFooter() string {
-	parts := []string{
-		helpStyle.Render(fmt.Sprintf("%s quit", keyStyle.Render("ctrl+c"))),
-	}
-	if m.screen == screenSettings && m.settingsDirty {
-		parts = append(parts, noticeStyle.Render("Unsaved settings changes"))
-	}
+	left := helpStyle.Render(time.Now().Format("2006-01-02 15:04:05"))
+	right := helpStyle.Render("PromptSensei v1.3.1")
+
+	msg := ""
 	if m.notice != "" {
-		parts = append(parts, noticeStyle.Render(m.notice))
+		msg = noticeStyle.Render(m.notice)
+	} else if m.lastErr != "" {
+		msg = errorStyle.Render(m.lastErr)
 	}
-	if m.lastErr != "" {
-		parts = append(parts, errorStyle.Render(m.lastErr))
+
+	totalWidth := m.width
+	if totalWidth == 0 {
+		totalWidth = 80
 	}
-	return strings.Join(parts, "  |  ")
+
+	space := totalWidth - lipgloss.Width(left) - lipgloss.Width(right)
+	if space < 0 {
+		space = 0
+	}
+
+	if msg != "" {
+		msgWidth := lipgloss.Width(msg)
+		// Try to center the message
+		midSpace := (space - msgWidth) / 2
+		if midSpace < 1 {
+			midSpace = 1
+		}
+		afterSpace := space - midSpace - msgWidth
+		if afterSpace < 1 {
+			afterSpace = 1
+		}
+		return left + strings.Repeat(" ", midSpace) + msg + strings.Repeat(" ", afterSpace) + right
+	}
+
+	return left + strings.Repeat(" ", space) + right
 }
 
 func (m *model) startBusy(mode string, label string) {
@@ -1308,36 +1281,56 @@ func (m model) activateOrEditSetting(direction int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	next := m.settingsDraft
-	changed, err := cycleSettingValue(&next, current.field, direction)
-	if err != nil {
-		m.lastErr = err.Error()
+	// Case 1: Arrow keys (direction != 0) - Only for cycling/numeric
+	if direction != 0 {
+		next := m.settingsDraft
+		changed, err := cycleSettingValue(&next, current.field, direction)
+		if err != nil {
+			m.lastErr = err.Error()
+			return m, nil
+		}
+		if changed {
+			m.settingsDraft = next
+			return m, saveSettingsCmd(m.saveConfig, m.settingsDraft)
+		}
+		// If not cycleable, arrows do nothing
 		return m, nil
 	}
-	if changed {
+
+	// Case 2: Enter/Space (direction == 0)
+	switch current.field.kind {
+	case settingKindBool, settingKindEnum:
+		// For toggle types, cycle forward
+		next := m.settingsDraft
+		_, err := cycleSettingValue(&next, current.field, 1)
+		if err != nil {
+			m.lastErr = err.Error()
+			return m, nil
+		}
 		m.settingsDraft = next
-		m.settingsDirty = m.settingsDraft != m.cfg
+		return m, saveSettingsCmd(m.saveConfig, m.settingsDraft)
+	case settingKindAction:
+		if current.field.key == settingActionDatasetStatus {
+			m.startBusy("status", "Loading dataset status")
+			return m, tea.Batch(m.spin.Tick, datasetStatusCmd(m.ctx, m.datasetService))
+		}
+	case settingKindString, settingKindSecret, settingKindFloat, settingKindInt:
+		// Open text editor for precision input
+		input := textinput.New()
+		input.SetValue(rawSettingValue(m.settingsDraft, current.field.key))
+		input.Width = max(30, m.width-20)
+		input.Placeholder = "Enter value..."
+		if current.field.kind == settingKindSecret {
+			input.EchoMode = textinput.EchoPassword
+			input.EchoCharacter = '*'
+		}
+		input.Focus()
+
+		m.settingsInput = input
+		m.settingsEdit = true
 		m.settingsError = ""
-		m.refreshSettingsList()
-		return m, nil
-	}
-	if direction < 0 {
-		return m, nil
 	}
 
-	input := textinput.New()
-	input.SetValue(rawSettingValue(m.settingsDraft, current.field.key))
-	input.Width = max(30, m.width-20)
-	input.Placeholder = "Enter value..."
-	if current.field.kind == settingKindSecret {
-		input.EchoMode = textinput.EchoPassword
-		input.EchoCharacter = '*'
-	}
-	input.Focus()
-
-	m.settingsInput = input
-	m.settingsEdit = true
-	m.settingsError = ""
 	return m, nil
 }
 

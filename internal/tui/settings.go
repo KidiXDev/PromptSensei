@@ -31,6 +31,7 @@ const (
 	settingDatasetMetadataPath       = "dataset.metadata_path"
 	settingDatasetAutoRebuild        = "dataset.auto_rebuild_on_csv_change"
 	settingDatasetSchemaVersion      = "dataset.schema_version"
+	settingActionDatasetStatus       = "action.dataset_status"
 )
 
 type settingKind int
@@ -42,6 +43,7 @@ const (
 	settingKindEnum
 	settingKindFloat
 	settingKindInt
+	settingKindAction
 )
 
 type settingField struct {
@@ -83,6 +85,8 @@ func (i settingItem) Title() string {
 		valStr = accentStyle.Render(i.value)
 	case settingKindSecret:
 		valStr = helpStyle.Render(i.value)
+	case settingKindAction:
+		valStr = highlightStyle.Render("Press Enter to View")
 	default:
 		valStr = i.value
 	}
@@ -118,6 +122,7 @@ var settingsFields = []settingField{
 	{key: settingDatasetCachePath, group: "Dataset", title: "Cache DB Path", description: "Path to generated sqlite cache", kind: settingKindString},
 	{key: settingDatasetMetadataPath, group: "Dataset", title: "Metadata Path", description: "Path to dataset metadata JSON", kind: settingKindString},
 	{key: settingDatasetSchemaVersion, group: "Dataset", title: "Schema Version", description: "Dataset schema version integer", kind: settingKindInt},
+	{key: settingActionDatasetStatus, group: "Dataset", title: "View Dataset Status", description: "Inspect CSV/SQLite cache health and statistics", kind: settingKindAction},
 }
 
 func buildSettingsItems(cfg config.Config) []list.Item {
@@ -178,6 +183,8 @@ func displaySettingValue(cfg config.Config, key string) string {
 		return fmt.Sprintf("%t", cfg.Dataset.AutoRebuildOnCSVChange)
 	case settingDatasetSchemaVersion:
 		return strconv.Itoa(cfg.Dataset.SchemaVersion)
+	case settingActionDatasetStatus:
+		return ""
 	default:
 		return ""
 	}
@@ -299,6 +306,8 @@ func applySettingValue(cfg *config.Config, field settingField, raw string) error
 			return fmt.Errorf("schema version must be > 0")
 		}
 		cfg.Dataset.SchemaVersion = v
+	case settingActionDatasetStatus:
+		// No-op for apply, handled as screen switch in model
 	default:
 		return fmt.Errorf("unsupported setting %s", field.key)
 	}
@@ -333,6 +342,43 @@ func cycleSettingValue(cfg *config.Config, field settingField, direction int) (b
 			idx = (idx - 1 + len(options)) % len(options)
 		}
 		return true, applySettingValue(cfg, field, options[idx])
+	case settingKindFloat:
+		val, _ := strconv.ParseFloat(displaySettingValue(*cfg, field.key), 64)
+		step := 0.05
+		if direction < 0 {
+			val -= step
+		} else {
+			val += step
+		}
+		// Domain specific clamping
+		if field.key == settingProviderTemperature {
+			if val < 0 {
+				val = 0
+			}
+			if val > 2 {
+				val = 2
+			}
+		}
+		return true, applySettingValue(cfg, field, fmt.Sprintf("%.2f", val))
+	case settingKindInt:
+		val, _ := strconv.Atoi(displaySettingValue(*cfg, field.key))
+		step := 1
+		if field.key == settingProviderMaxTokens {
+			step = 100
+		}
+		if direction < 0 {
+			val -= step
+		} else {
+			val += step
+		}
+		// Clamping for max tokens
+		if field.key == settingProviderMaxTokens && val < 64 {
+			val = 64
+		}
+		if field.key == settingProviderTimeoutSeconds && val < 5 {
+			val = 5
+		}
+		return true, applySettingValue(cfg, field, strconv.Itoa(val))
 	default:
 		return false, nil
 	}
