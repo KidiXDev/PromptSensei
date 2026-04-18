@@ -198,10 +198,19 @@ func newModel(
 	home.SetShowStatusBar(false)
 	home.SetShowHelp(false)
 	home.SetFilteringEnabled(false)
+ 
+	selKnowledge := make(map[string]struct{})
+	for _, k := range cfg.UI.SelectedKnowledge {
+		selKnowledge[k] = struct{}{}
+	}
 
 	knowledgeItems := make([]list.Item, 0, len(knowledgeFiles))
 	for _, file := range knowledgeFiles {
-		knowledgeItems = append(knowledgeItems, knowledgeItem{name: file, selected: false})
+		selected := false
+		if _, ok := selKnowledge[file]; ok {
+			selected = true
+		}
+		knowledgeItems = append(knowledgeItems, knowledgeItem{name: file, selected: selected})
 	}
 	knowledge := list.New(knowledgeItems, list.NewDefaultDelegate(), 60, 14)
 	knowledge.Title = "Knowledge Selection"
@@ -229,6 +238,7 @@ func newModel(
 	settings.SetShowHelp(false)
 	settings.SetFilteringEnabled(false)
 
+
 	return model{
 		ctx:               ctx,
 		promptService:     promptService,
@@ -255,7 +265,7 @@ func newModel(
 		busyMode:          "startup_check",
 		busyLabel:         "Checking dataset cache",
 		busyElapsed:       time.Now(),
-		selectedKnowledge: map[string]struct{}{},
+		selectedKnowledge: selKnowledge,
 	}
 }
 
@@ -524,10 +534,10 @@ func (m model) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.startEnhanceCmd(*req, "Generating prompt")
 		case "ctrl+g":
 			m.mode = nextMode(m.mode)
-			return m, nil
+			return m, m.saveEditorSettings()
 		case "ctrl+b":
 			m.strict = !m.strict
-			return m, nil
+			return m, m.saveEditorSettings()
 		case "ctrl+k":
 			m.knowledgeReturn = screenEditor
 			m.syncKnowledgeListSelection()
@@ -582,7 +592,7 @@ func (m model) updateKnowledge(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.notice = "Knowledge disabled: " + item.name
 			}
-			return m, nil
+			return m, m.saveKnowledgeSelection()
 		case "a":
 			items := m.knowledgeList.Items()
 			for i := range items {
@@ -592,7 +602,7 @@ func (m model) updateKnowledge(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedKnowledge[item.name] = struct{}{}
 			}
 			m.knowledgeList.SetItems(items)
-			return m, nil
+			return m, m.saveKnowledgeSelection()
 		case "c":
 			items := m.knowledgeList.Items()
 			for i := range items {
@@ -602,7 +612,7 @@ func (m model) updateKnowledge(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.selectedKnowledge = map[string]struct{}{}
 			m.knowledgeList.SetItems(items)
-			return m, nil
+			return m, m.saveKnowledgeSelection()
 		}
 	}
 	return m, cmd
@@ -1680,6 +1690,19 @@ func (m model) activateOrEditSetting(direction int) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *model) saveKnowledgeSelection() tea.Cmd {
+	m.cfg.UI.SelectedKnowledge = m.selectedKnowledgeList()
+	m.settingsDraft = m.cfg
+	return saveSettingsCmd(m.saveConfig, m.cfg)
+}
+
+func (m *model) saveEditorSettings() tea.Cmd {
+	m.cfg.General.DefaultMode = m.mode
+	m.cfg.General.StrictBooruValidation = m.strict
+	m.settingsDraft = m.cfg
+	return saveSettingsCmd(m.saveConfig, m.cfg)
 }
 
 func (m model) selectedKnowledgeList() []string {

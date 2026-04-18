@@ -32,8 +32,9 @@ type ProviderConfig struct {
 }
 
 type UIConfig struct {
-	ShowDebugPanel          bool `json:"show_debug_panel"`
-	ShowRetrievalCandidates bool `json:"show_retrieval_candidates"`
+	ShowDebugPanel          bool     `json:"show_debug_panel"`
+	ShowRetrievalCandidates bool     `json:"show_retrieval_candidates"`
+	SelectedKnowledge       []string `json:"selected_knowledge"`
 }
 
 type DatasetConfig struct {

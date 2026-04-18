@@ -27,7 +27,7 @@ func (i knowledgeItem) Title() string {
 
 func (i knowledgeItem) Description() string {
 	if i.selected {
-		return "Enabled - will be context-loaded during prompt generation"
+		return "Enabled"
 	}
 	return "Available"
 }
