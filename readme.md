@@ -22,7 +22,24 @@
 
 ### Prerequisites
 - [Go](https://go.dev/doc/install) 1.21 or higher.
-- A Booru-compatible CSV dataset (placed in the `~/.config/prompt-sensei/system` directory).
+
+## 📊 Dataset Configuration
+
+PromptSensei requires two CSV files to power its local retrieval engine. Due to size and licensing, **these datasets are not included**. You must find them somewhere on the internet and ensure they follow the exact column format and order required for the application to parse them correctly.
+
+The files must be placed in: `~/.config/prompt-sensei/system` (on Windows, this resolves to `C:\Users\<User>\.config\prompt-sensei\system`).
+
+### 1. `tag.csv`
+Used for tag autocompletion, alias resolution, and category identification.
+
+- **Column Format**: `tag,category,post_count,alternative`
+- **Example**: `1girl,0,7528518,"sole_female,1girls"`
+
+### 2. `danbooru_character.csv`
+Used for character core tag recognition and copyright mapping.
+
+- **Column Format**: `character,copyright,trigger,core_tags,count,solo_count,url`
+- **Example**: `hakurei_reimu,touhou,"hakurei reimu, reimu, touhou","1girl, brown_hair, long_hair, hair_bow, detached_sleeves",78109,27118,https://danbooru.donmai.us/posts?tags=hakurei_reimu`
 
 ### Installation
 
@@ -34,7 +51,7 @@
 
 2. Build the binary:
    ```bash
-   go build -o bin/prompt-sensei ./cmd/prompt-sensei
+   go build -o bin/prompt-sensei .
    ```
 
 3. Run the application:
