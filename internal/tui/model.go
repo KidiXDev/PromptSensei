@@ -539,9 +539,8 @@ func (m model) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.saveEditorSettings()
 		case "ctrl+b":
 			if m.mode != domain.ModeBooru {
-				m.strict = false
 				m.lastErr = "strict can only be enabled in booru mode"
-				return m, m.saveEditorSettings()
+				return m, nil
 			}
 			m.strict = !m.strict
 			return m, m.saveEditorSettings()
