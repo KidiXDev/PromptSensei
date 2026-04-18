@@ -72,17 +72,23 @@ Used for character core tag recognition and copyright mapping.
 We are constantly working to expand PromptSensei. Planned updates include:
 
 ### 🚀 Upcoming AI Providers
-- [ ] **Anthropic (Claude)**: Native support for Claude models.
-- [ ] **Google Gemini**: Direct integration with Gemini API.
-- [ ] **Mistral AI**: Support for Mistral and Mixtral models.
-- [ ] **Groq**: Ultra-fast inference via Groq LPU.
-- [ ] **Together AI**: Access to widespread open-source models.
-- [ ] **Local LLMs**: Integration with Ollama and LM Studio.
+- [x] **OpenAI**
+- [x] **OpenRouter**
+- [x] **Fireworks AI**
+- [x] **NanoGPT**
+- [ ] **Anthropic (Claude)**
+- [ ] **Google Gemini**
+- [ ] **Mistral AI**
+- [ ] **Groq**
+- [ ] **Local LLMs** - Integration with Ollama and LM Studio.
 
 ### 🛠️ Planned Features
-- [ ] **Image Preview**: Integration with ComfyUI for immediate result testing.
-- [ ] **Tag Relationship Map**: Visualize tag associations from the local dataset.
-- [ ] **Custom Style Templates**: Save and reuse prompt "recipes" for different aesthetics.
+- [ ] **Image Preview**: Integration with ComfyUI for immediate prompt testing directly from the results screen.
+- [ ] **Tag Relationship Map**: Visualize tag associations and character-core tag relations in a dedicated TUI explorer.
+- [ ] **Weighted Tag Support**: Native UI support for applying and managing tag weights (e.g., `(tag:1.2)`).
+- [ ] **Custom Style Templates**: Save and reuse complex prompt "recipes" and composition templates.
+- [ ] **Batch Processing**: Load multiple ideas from a file to generate large sets of prompts in one run.
+- [ ] **Theme Support**: Customizable TUI color schemes beyond the default aesthetic.
 
 ## 📄 License
 This project is licensed under the MIT License - see the LICENSE file for details.
