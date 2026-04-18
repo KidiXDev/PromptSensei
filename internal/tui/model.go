@@ -198,7 +198,7 @@ func newModel(
 	home.SetShowStatusBar(false)
 	home.SetShowHelp(false)
 	home.SetFilteringEnabled(false)
- 
+
 	selKnowledge := make(map[string]struct{})
 	for _, k := range cfg.UI.SelectedKnowledge {
 		selKnowledge[k] = struct{}{}
@@ -238,7 +238,6 @@ func newModel(
 	settings.SetShowHelp(false)
 	settings.SetFilteringEnabled(false)
 
-
 	return model{
 		ctx:               ctx,
 		promptService:     promptService,
@@ -261,7 +260,7 @@ func newModel(
 		settingsDraft:     cfg,
 		spin:              spin,
 		mode:              cfg.General.DefaultMode,
-		strict:            cfg.General.StrictBooruValidation,
+		strict:            cfg.General.StrictBooruValidation && cfg.General.DefaultMode == domain.ModeBooru,
 		busyMode:          "startup_check",
 		busyLabel:         "Checking dataset cache",
 		busyElapsed:       time.Now(),
@@ -419,7 +418,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.cfg = m.settingsDraft
 		m.mode = m.cfg.General.DefaultMode
-		m.strict = m.cfg.General.StrictBooruValidation
+		m.strict = m.cfg.General.StrictBooruValidation && m.mode == domain.ModeBooru
 		m.notice = ""
 		m.lastErr = ""
 		m.refreshSettingsList()
@@ -534,8 +533,15 @@ func (m model) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.startEnhanceCmd(*req, "Generating prompt")
 		case "ctrl+g":
 			m.mode = nextMode(m.mode)
+			if m.mode != domain.ModeBooru {
+				m.strict = false
+			}
 			return m, m.saveEditorSettings()
 		case "ctrl+b":
+			if m.mode != domain.ModeBooru {
+				m.lastErr = "strict can only be enabled in booru mode"
+				return m, nil
+			}
 			m.strict = !m.strict
 			return m, m.saveEditorSettings()
 		case "ctrl+k":
@@ -1699,6 +1705,9 @@ func (m *model) saveKnowledgeSelection() tea.Cmd {
 }
 
 func (m *model) saveEditorSettings() tea.Cmd {
+	if m.mode != domain.ModeBooru {
+		m.strict = false
+	}
 	m.cfg.General.DefaultMode = m.mode
 	m.cfg.General.StrictBooruValidation = m.strict
 	m.settingsDraft = m.cfg

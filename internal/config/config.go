@@ -87,6 +87,9 @@ func (c *Config) ApplyDefaults(paths Paths) {
 	if c.General.DefaultMode == "" {
 		c.General.DefaultMode = d.General.DefaultMode
 	}
+	if c.General.DefaultMode != domain.ModeBooru {
+		c.General.StrictBooruValidation = false
+	}
 	if c.General.DefaultOutputStyle == "" {
 		c.General.DefaultOutputStyle = d.General.DefaultOutputStyle
 	}

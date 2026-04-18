@@ -127,6 +127,10 @@ func runEnhanceCommand(ctx context.Context, runtime *Runtime, create bool, args 
 		fmt.Fprintf(errOut, "error: %v\n", err)
 		return 1
 	}
+	if *strict && mode != domain.ModeBooru {
+		fmt.Fprintln(errOut, "error: --strict can only be enabled with --mode booru")
+		return 1
+	}
 
 	result, warnings, err := runtime.Prompt.Enhance(ctx, domain.EnhanceRequest{
 		Prompt:         *prompt,

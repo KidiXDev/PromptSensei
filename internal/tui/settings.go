@@ -204,10 +204,16 @@ func applySettingValue(cfg *config.Config, field settingField, raw string) error
 			return err
 		}
 		cfg.General.DefaultMode = mode
+		if mode != domain.ModeBooru {
+			cfg.General.StrictBooruValidation = false
+		}
 	case settingGeneralStrictValidation:
 		v, err := parseBool(raw)
 		if err != nil {
 			return err
+		}
+		if v && cfg.General.DefaultMode != domain.ModeBooru {
+			return fmt.Errorf("strict booru validation can only be enabled in booru mode")
 		}
 		cfg.General.StrictBooruValidation = v
 	case settingGeneralTagWhitespace:
