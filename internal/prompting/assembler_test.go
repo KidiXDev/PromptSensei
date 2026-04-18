@@ -44,7 +44,7 @@ func TestAssembleIncludesKeySections(t *testing.T) {
 	if !strings.Contains(strings.Join(out.UserPrompts, "\n"), "Character context #1") {
 		t.Fatalf("user prompts missing per-character context")
 	}
-	if !strings.Contains(strings.Join(out.UserPrompts, "\n"), "Strict ordering (left -> right)") {
+	if !strings.Contains(strings.Join(out.UserPrompts, "\n"), "Strict ordering: metadata -> subject -> character") {
 		t.Fatalf("user prompts missing strict ordering guidance")
 	}
 }

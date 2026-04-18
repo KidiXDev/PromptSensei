@@ -31,6 +31,7 @@ const (
 	screenDataset
 	screenSettings
 	screenResult
+	screenThinking
 	screenBusy
 )
 
@@ -117,6 +118,7 @@ type model struct {
 	focusedEditor int
 	datasetView   viewport.Model
 	resultView    viewport.Model
+	thinkingView  viewport.Model
 	settingsList  list.Model
 	settingsDraft config.Config
 	settingsInput textinput.Model
@@ -244,6 +246,7 @@ func newModel(
 		focusedEditor:     0,
 		datasetView:       viewport.New(80, 14),
 		resultView:        viewport.New(80, 14),
+		thinkingView:      viewport.New(80, 14),
 		settingsList:      settings,
 		settingsDraft:     cfg,
 		spin:              spin,
@@ -323,6 +326,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearBusyState()
 		m.resultView.SetContent(buildResultText(msg.result, msg.warnings, m.resultView.Width))
 		m.resultView.GotoTop()
+		m.thinkingView.SetContent(buildThinkingText(msg.result, m.thinkingView.Width))
+		m.thinkingView.GotoTop()
 		m.screen = screenResult
 		return m, nil
 	case enhanceStreamMsg:
@@ -424,6 +429,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSettings(msg)
 	case screenResult:
 		return m.updateResult(msg)
+	case screenThinking:
+		return m.updateThinking(msg)
 	case screenBusy:
 		return m.updateBusy(msg)
 	default:
@@ -686,11 +693,34 @@ func (m model) updateResult(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			m.screen = screenEditor
 			return m, nil
+		case "f":
+			if m.lastResult == nil {
+				return m, nil
+			}
+			m.editor.SetValue(strings.TrimSpace(m.lastResult.Output))
+			m.contextEditor.SetValue("")
+			m.focusedEditor = 1
+			m.editor.Blur()
+			m.contextEditor.Focus()
+			m.createMode = false
+			m.notice = "Refine mode ready. Add context and press ctrl+s."
+			m.screen = screenEditor
+			return m, nil
 		case "r":
 			if m.lastRequest == nil {
 				return m, nil
 			}
 			return m, m.startEnhanceCmd(*m.lastRequest, "Regenerating prompt")
+		case "t":
+			if m.lastResult == nil || strings.TrimSpace(m.lastResult.Reasoning) == "" {
+				m.lastErr = "no thinking output available for this generation"
+				return m, nil
+			}
+			m.lastErr = ""
+			m.thinkingView.SetContent(buildThinkingText(m.lastResult, m.thinkingView.Width))
+			m.thinkingView.GotoTop()
+			m.screen = screenThinking
+			return m, nil
 		case "c":
 			if m.lastResult == nil {
 				return m, nil
@@ -707,6 +737,20 @@ func (m model) updateResult(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m model) updateThinking(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.thinkingView, cmd = m.thinkingView.Update(msg)
+
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "esc", "q":
+			m.screen = screenResult
+			return m, nil
+		}
+	}
+	return m, cmd
+}
+
 func (m model) updateBusy(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.spin, cmd = m.spin.Update(msg)
@@ -716,28 +760,41 @@ func (m model) updateBusy(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	header := titleStyle.Render(domain.AppName)
 	subtitle := subtitleStyle.Render("AI prompt crafting with local booru-aware retrieval")
+	headerBlock := lipgloss.JoinVertical(lipgloss.Left, header, subtitle)
+	footer := m.renderFooter()
 
 	body := ""
 	panelW := max(40, m.width-2)
 	switch m.screen {
 	case screenHome:
-		body = panelStyle.Width(panelW).Render(m.renderHome())
+		body = m.renderHome()
 	case screenEditor:
-		body = panelStyle.Width(panelW).Render(m.renderEditor())
+		body = m.renderEditor()
 	case screenKnowledge:
-		body = panelStyle.Width(panelW).Render(m.renderKnowledge())
+		body = m.renderKnowledge()
 	case screenDataset:
-		body = panelStyle.Width(panelW).Render(m.renderDataset())
+		body = m.renderDataset()
 	case screenSettings:
-		body = panelStyle.Width(panelW).Render(m.renderSettings())
+		body = m.renderSettings()
 	case screenResult:
-		body = panelStyle.Width(panelW).Render(m.renderResult())
+		body = m.renderResult()
+	case screenThinking:
+		body = m.renderThinking()
 	case screenBusy:
-		body = panelStyle.Width(panelW).Render(m.renderBusy())
+		body = m.renderBusy()
 	}
 
-	footer := m.renderFooter()
-	return lipgloss.JoinVertical(lipgloss.Left, header, subtitle, "", body, "", footer)
+	bodyHeight := m.panelOuterHeight()
+	bodyPanel := panelStyle.Width(panelW).Height(bodyHeight).Render(body)
+
+	out := lipgloss.JoinVertical(lipgloss.Left, headerBlock, "", bodyPanel, "", footer)
+	if m.height > 0 {
+		current := lipgloss.Height(out)
+		if current < m.height {
+			out += strings.Repeat("\n", m.height-current)
+		}
+	}
+	return out
 }
 
 func (m *model) resizeComponents() {
@@ -761,11 +818,17 @@ func (m *model) resizeComponents() {
 	m.contextEditor.SetHeight(max(3, contextHeight))
 
 	viewportWidth := max(40, m.width-12)
-	viewportHeight := max(8, m.height-18)
+	viewportHeight := max(6, m.panelContentHeight()-4)
 	m.datasetView.Width = viewportWidth
 	m.datasetView.Height = viewportHeight
 	m.resultView.Width = viewportWidth
 	m.resultView.Height = viewportHeight
+	m.thinkingView.Width = viewportWidth
+	m.thinkingView.Height = viewportHeight
+	if m.lastResult != nil {
+		m.resultView.SetContent(buildResultText(m.lastResult, m.warnings, m.resultView.Width))
+		m.thinkingView.SetContent(buildThinkingText(m.lastResult, m.thinkingView.Width))
+	}
 }
 
 func (m model) renderHome() string {
@@ -903,22 +966,39 @@ func (m model) renderResult() string {
 	}
 
 	header := highlightStyle.Render("✨ GENERATED PROMPT")
+	help := helpStyle.Render(
+		fmt.Sprintf(
+			"%s copy  %s rerun  %s edit  %s refine  %s thinking  %s back",
+			keyStyle.Render("c"),
+			keyStyle.Render("r"),
+			keyStyle.Render("e"),
+			keyStyle.Render("f"),
+			keyStyle.Render("t"),
+			keyStyle.Render("esc"),
+		),
+	)
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	main := lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		"",
 		m.resultView.View(),
-		"",
-		helpStyle.Render(
-			fmt.Sprintf(
-				"%s copy  %s rerun  %s edit  %s back",
-				keyStyle.Render("c"),
-				keyStyle.Render("r"),
-				keyStyle.Render("e"),
-				keyStyle.Render("esc"),
-			),
-		),
 	)
+
+	return m.composeWithBottom(main, help)
+}
+
+func (m model) renderThinking() string {
+	if m.lastResult == nil || strings.TrimSpace(m.lastResult.Reasoning) == "" {
+		return "No thinking output available."
+	}
+
+	header := highlightStyle.Render("🧠 THINKING OUTPUT (READ ONLY)")
+	main := lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		"",
+		m.thinkingView.View(),
+	)
+	return m.composeWithBottom(main, helpStyle.Render(fmt.Sprintf("%s back", keyStyle.Render("esc/q"))))
 }
 
 func buildResultText(result *domain.EnhanceResult, warnings []string, width int) string {
@@ -951,20 +1031,28 @@ func buildResultText(result *domain.EnhanceResult, warnings []string, width int)
 
 	techPanel := techInfoStyle.Render(strings.Join(techLines, "\n"))
 
-	reasoningPanel := ""
-	if strings.TrimSpace(result.Reasoning) != "" {
-		reasoningPanel = techInfoStyle.Render(strings.Join([]string{
-			"",
-			accentStyle.Render("THINKING"),
-			strings.TrimSpace(result.Reasoning),
-		}, "\n"))
-	}
-
 	return lipgloss.JoinVertical(lipgloss.Left,
 		promptContent,
 		techPanel,
-		reasoningPanel,
 	)
+}
+
+func buildThinkingText(result *domain.EnhanceResult, width int) string {
+	if result == nil || strings.TrimSpace(result.Reasoning) == "" {
+		return "No thinking output available."
+	}
+
+	contentWidth := max(20, width-4)
+	body := strings.TrimSpace(result.Reasoning)
+	body = wrapText(body, contentWidth)
+
+	lines := []string{
+		accentStyle.Render("MODEL THINKING TRACE"),
+		fmt.Sprintf("Provider: %s", result.ProviderName),
+		"",
+		body,
+	}
+	return strings.Join(lines, "\n")
 }
 
 func buildDatasetText(status services.DatasetStatus) string {
@@ -1237,12 +1325,26 @@ func (m model) renderBusy() string {
 	}
 
 	if m.busyMode == "enhance" {
-		maxLines := m.busySectionMaxLines()
-		if strings.TrimSpace(m.liveReasoning) != "" {
-			lines = append(lines, "", m.renderBusyStreamPanel("Thinking", m.liveReasoning, true, contentWidth, maxLines))
-		}
-		if strings.TrimSpace(m.liveOutput) != "" {
-			lines = append(lines, "", m.renderBusyStreamPanel("Output", m.liveOutput, false, contentWidth, maxLines))
+		thinking := strings.TrimSpace(m.liveReasoning)
+		output := strings.TrimSpace(m.liveOutput)
+		if thinking != "" || output != "" {
+			available := m.busySectionMaxLines()
+			thinkingLines := available
+			outputLines := 0
+			if thinking != "" && output != "" {
+				thinkingLines = max(4, int(float64(available)*0.6))
+				outputLines = max(4, available-thinkingLines)
+			} else if output != "" {
+				thinkingLines = 0
+				outputLines = available
+			}
+
+			if thinking != "" {
+				lines = append(lines, "", m.renderBusyStreamPanel("Thinking", thinking, true, contentWidth, thinkingLines))
+			}
+			if output != "" {
+				lines = append(lines, "", m.renderBusyStreamPanel("Output", output, false, contentWidth, outputLines))
+			}
 		}
 	}
 
@@ -1362,6 +1464,9 @@ func (m model) renderBusyStreamPanel(title, content string, subtle bool, width i
 	content = previewTail(content, 4000)
 	content = wrapText(content, innerWidth)
 	content = tailLines(content, maxLines)
+	if maxLines > 0 {
+		base = base.Height(maxLines + 3) // header + wrapped body + borders/padding
+	}
 	header := accentStyle.Render(title)
 	body := content
 	if subtle {
@@ -1400,10 +1505,37 @@ func (m model) busyContentWidth() int {
 }
 
 func (m model) busySectionMaxLines() int {
-	if m.height <= 0 {
-		return 10
+	return max(6, m.panelContentHeight()-8)
+}
+
+func (m model) composeWithBottom(main string, bottom string) string {
+	target := m.panelContentHeight()
+	mainH := lipgloss.Height(main)
+	bottomH := lipgloss.Height(bottom)
+	gap := target - mainH - bottomH
+	if gap < 1 {
+		gap = 1
 	}
-	return max(4, (m.height-22)/2)
+	return main + strings.Repeat("\n", gap) + bottom
+}
+
+func (m model) panelOuterHeight() int {
+	if m.height <= 0 {
+		return 12
+	}
+	header := lipgloss.JoinVertical(
+		lipgloss.Left,
+		titleStyle.Render(domain.AppName),
+		subtitleStyle.Render("AI prompt crafting with local booru-aware retrieval"),
+	)
+	// Reserve 2 blank separators in final join.
+	reserved := lipgloss.Height(header) + lipgloss.Height(m.renderFooter()) + 2
+	return max(8, m.height-reserved)
+}
+
+func (m model) panelContentHeight() int {
+	// panelStyle has border + vertical padding (2 + 2 = 4 lines total).
+	return max(4, m.panelOuterHeight()-4)
 }
 
 func tailLines(content string, maxLines int) string {

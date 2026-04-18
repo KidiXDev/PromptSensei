@@ -2,6 +2,8 @@ package config
 
 import "github.com/kidixdev/PromptSensei/internal/domain"
 
+const EnableLogging = false
+
 type Config struct {
 	General  GeneralConfig  `json:"general"`
 	Provider ProviderConfig `json:"provider"`

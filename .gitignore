@@ -33,3 +33,7 @@ go.work.sum
 
 bin/
 .agent-task/
+
+/*.md
+!/README.md
+!/LICENSE.md

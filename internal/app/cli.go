@@ -14,11 +14,13 @@ import (
 )
 
 func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
-	if err := logging.Init(); err != nil {
-		fmt.Fprintf(errOut, "warning: logger init failed: %v\n", err)
-	} else {
-		fmt.Fprintf(out, "debug logging enabled: %s\n", logging.Path())
-		logging.Info("application start", "args", strings.Join(args, " "))
+	if config.EnableLogging {
+		if err := logging.Init(); err != nil {
+			fmt.Fprintf(errOut, "warning: logger init failed: %v\n", err)
+		} else {
+			fmt.Fprintf(out, "debug logging enabled: %s\n", logging.Path())
+			logging.Info("application start", "args", strings.Join(args, " "))
+		}
 	}
 
 	if len(args) >= 2 && args[0] == "config" && args[1] == "init" {
