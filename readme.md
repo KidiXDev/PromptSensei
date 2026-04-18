@@ -17,6 +17,14 @@
 - **🗂️ Knowledge Base Integration**: Inject custom Markdown documentation (characters, styles, lore) directly into the prompting context using `ctrl+k` in the editor.
 - **⚙️ Modern TUI**: A beautiful, edge-to-edge terminal interface powered by [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss).
 
+## 🤖 Supported AI Providers
+
+PromptSensei integrates with leading AI providers to power its generation engine. We support OpenAI-compatible APIs and major aggregators:
+
+- **OpenAI**: [https://openai.com/](https://openai.com/)
+- **OpenRouter**: [https://openrouter.ai/](https://openrouter.ai/)
+- **Fireworks AI**: [https://fireworks.ai/](https://fireworks.ai/)
+- **NanoGPT**: [https://nano-gpt.com/](https://nano-gpt.com/)
 
 ## 🚀 Getting Started
 
@@ -59,8 +67,22 @@ Used for character core tag recognition and copyright mapping.
    ./bin/prompt-sensei
    ```
 
+## 📅 Roadmap / Todo
+
+We are constantly working to expand PromptSensei. Planned updates include:
+
+### 🚀 Upcoming AI Providers
+- [ ] **Anthropic (Claude)**: Native support for Claude models.
+- [ ] **Google Gemini**: Direct integration with Gemini API.
+- [ ] **Mistral AI**: Support for Mistral and Mixtral models.
+- [ ] **Groq**: Ultra-fast inference via Groq LPU.
+- [ ] **Together AI**: Access to widespread open-source models.
+- [ ] **Local LLMs**: Integration with Ollama and LM Studio.
+
+### 🛠️ Planned Features
+- [ ] **Image Preview**: Integration with ComfyUI for immediate result testing.
+- [ ] **Tag Relationship Map**: Visualize tag associations from the local dataset.
+- [ ] **Custom Style Templates**: Save and reuse prompt "recipes" for different aesthetics.
 
 ## 📄 License
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-*Crafted with ❤️ for the AI Art Community.*
